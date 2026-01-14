@@ -9,7 +9,6 @@ DEFINE_bool(uring_iopool, false,
             "Whether to enable IORING_SETUP_IOPOLL for all uring instances or not"
             "Require the block device (SSD) to support IOPOLL");
 DEFINE_string(db_path, "/dev/s0", "Default block device");
-DEFINE_string(exmap_path, "/dev/exmap0", "Default Exmap path");
 DEFINE_uint32(worker_count, 16, "The number of workers");
 DEFINE_uint32(page_provider_thread, 0, "Number of page provider threads");
 DEFINE_bool(worker_pin_thread, false, "Pin worker to a specific thread");

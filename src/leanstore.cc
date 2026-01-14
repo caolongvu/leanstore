@@ -141,15 +141,6 @@ LeanStore::~LeanStore() {
 void LeanStore::Shutdown() {
   worker_pool.Stop();
   Ensure(is_running == false);
-  for (size_t w_id = 0; w_id <= FLAGS_worker_count; w_id++) {
-    struct exmap_action_params params = {
-      .interface = static_cast<u16>(w_id),
-      .iov_len   = 0,
-      .opcode    = EXMAP_OP_RM_SD,
-      .flags     = 0,
-    };
-    ioctl(buffer_pool->exmapfd_, EXMAP_IOCTL_ACTION, &params);
-  }
   if (group_committer.joinable()) { group_committer.join(); }
   if (stat_collector.joinable()) {
     stat_collector.join();
