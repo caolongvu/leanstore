@@ -73,7 +73,7 @@ DEFINE_bool(blob_normal_buffer_pool, true,
             "2. *IMPORTANT* Extra hashtable lookup on Buffer's ToPtr & Read op"
             "3. *IMPORTANT* Require chunked processing on large object operations"
             "4. GroupCommit::PrepareLargePageWrite: Write on 4KB granularity instead of extent granularity");
-DEFINE_uint64(blob_buffer_pool_gb, 0,
+DEFINE_uint64(blob_buffer_pool_gb, 1,
               "Fixed size of the virtual memory range of BLOB in GBs"
               "0. Same value with FLAGS_bm_virtual_gb"
               "> 0. Fixed value");

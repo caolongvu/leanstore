@@ -1,4 +1,5 @@
 #include "benchmark/tpcc/workload.h"
+#include "benchmark/tpcc/config.h"
 #include "benchmark/adapters/leanstore_adapter.h"
 
 #include <algorithm>
@@ -543,7 +544,7 @@ void TPCCWorkload<AdapterType>::LoadOrder(Integer w_id, Integer d_id) {
 
 template <template <typename> class AdapterType>
 void TPCCWorkload<AdapterType>::LoadItem() {
-  spdlog::debug("Load %u items", ITEMS_CNT);
+  spdlog::debug("Start loading {} items", ITEMS_CNT);
   for (Integer idx = 1; idx <= ITEMS_CNT; idx++) {
     auto i_data = RandomString<50>(25, 50);
     if (Rand(10) == 0) {
@@ -557,7 +558,7 @@ void TPCCWorkload<AdapterType>::LoadItem() {
 
 template <template <typename> class AdapterType>
 void TPCCWorkload<AdapterType>::LoadWarehouse() {
-  spdlog::debug("Load %u warehouses", ITEMS_CNT);
+  spdlog::debug("Start loading {} warehouses", ITEMS_CNT);
   for (Integer idx = 1; idx <= warehouse_count; idx++) {
     warehouse.Insert(
       {idx}, {RandomString<10>(6, 10), RandomString<20>(10, 20), RandomString<20>(10, 20), RandomString<20>(10, 20),
@@ -575,6 +576,10 @@ void TPCCWorkload<AdapterType>::InitializeThread() {
 
 template <template <typename> class AdapterType>
 auto TPCCWorkload<AdapterType>::ExecuteTransaction(Integer w_id) -> int {
+  if (FLAGS_tpcc_neworder_only) {
+    DoNewOrderRandom(w_id);
+    return 4;
+  }
   auto rnd = UniformRand(1, 100);
   if (rnd <= 43) {
     DoPaymentRandom(w_id);

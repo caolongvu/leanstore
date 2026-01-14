@@ -93,9 +93,7 @@ BufferManager::BufferManager(u64 virtual_page_count, u64 physical_page_count, u6
   Construction();
 }
 
-BufferManager::~BufferManager() {
-  close(blockfd_);
-}
+BufferManager::~BufferManager() { close(blockfd_); }
 
 /**
  * @brief Format of the virtual memory buffer pool is as followed:
@@ -136,8 +134,7 @@ void BufferManager::Construction() {
 
   // Workers + Page providers + 1 Group Commit thread
   auto no_interfaces = FLAGS_worker_count + FLAGS_page_provider_thread + 1;
-
-    mem_ = static_cast<storage::Page *>(
+  mem_               = static_cast<storage::Page *>(
     mmap(nullptr, virtual_alloc_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
   if (mem_ == MAP_FAILED) { throw leanstore::ex::GenericException("mmap failed"); };
 
@@ -287,7 +284,7 @@ void BufferManager::HandlePageFault(pageid_t page_id) {
 }
 
 void BufferManager::ReadPage(pageid_t page_id) {
-    int ret = pread(blockfd_, ToPtr(page_id), PAGE_SIZE, page_id * PAGE_SIZE);
+  int ret = pread(blockfd_, ToPtr(page_id), PAGE_SIZE, page_id * PAGE_SIZE);
   assert(ret == PAGE_SIZE);
   statistics::buffer::read_cnt++;
 }
@@ -495,7 +492,6 @@ void BufferManager::ReadExtents(const storage::LargePageList &large_pages) {
     Ensure((sync::PageState::UNLOCKED < GetPageState(lp.start_pid).LockState()) &&
            (GetPageState(lp.start_pid).LockState() <= sync::PageState::EXCLUSIVE));
   }
-  Ensure(to_read_lp.size() <= EXMAP_USER_INTERFACE_PAGES);
   physical_used_cnt_ += total_page_cnt;
   EnsureFreePages();
 

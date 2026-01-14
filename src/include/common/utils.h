@@ -7,7 +7,6 @@
 
 #include "liburing.h"
 
-#include <linux/exmap.h>
 #include <sys/mman.h>
 #include <atomic>
 #include <bit>

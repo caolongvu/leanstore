@@ -287,7 +287,7 @@ void LeanStore::StartProfilingThread() {
   stat_collector  = std::thread([&]() {
     pthread_setname_np(pthread_self(), "stats_collector");
     std::printf(
-      "ts,tx,normal,rfa,commit_rounds,bm_rmb,bm_wmb,bm_evict,log_sz_mb,logio_mb,force_commit,"
+      "ts,tx,normal,rfa,commit_rounds,bm_rmb,bm_wmb,bm_evict,log_sz_mb,logio_mb,log_flush_cnt,"
        "gct_p1_us,gct_p2_us,gct_p3_us,db_size\n");
     auto cnt           = 0UL;
     auto completed_txn = 0UL;
@@ -319,22 +319,24 @@ void LeanStore::StartProfilingThread() {
       auto e_cnt = statistics::buffer::evict_cnt.exchange(0);
       auto db_sz = DBSize();
       // Group commit stats
-      auto log_sz    = 0.0F;
-      auto log_write = 0.0F;
-      auto p1_us     = 0UL;
-      auto p2_us     = 0UL;
-      auto p3_us     = 0UL;
+      auto log_sz        = 0.0F;
+      auto log_write     = 0.0F;
+      auto log_flush_cnt = 0UL;
+      auto p1_us         = 0UL;
+      auto p2_us         = 0UL;
+      auto p3_us         = 0UL;
       for (auto idx = 0U; idx <= FLAGS_worker_count; idx++) {
         log_sz += static_cast<float>(statistics::recovery::real_log_bytes[idx].exchange(0)) / MB;
         log_write += static_cast<float>(statistics::recovery::written_log_bytes[idx].exchange(0)) / MB;
+        log_flush_cnt += statistics::log_flush_cnt[idx].exchange(0);
         p1_us += statistics::recovery::gct_phase_1_ns[idx].exchange(0) / 1000;
         p2_us += statistics::recovery::gct_phase_2_ns[idx].exchange(0) / 1000;
         p3_us += statistics::recovery::gct_phase_3_ns[idx].exchange(0) / 1000;
       }
       commit_exec += p1_us + p2_us + p3_us;
       // Output
-      std::printf("%lu,%lu,%lu,%lu,%lu,%.4f,%.4f,%lu,%.4f,%.4f,%lu,%lu,%lu,%.4f\n", cnt++, progress, normal_txn,
-                   rfa_txn, rounds, r_mb, w_mb, e_cnt, log_sz, log_write, p1_us, p2_us, p3_us, db_sz);
+      std::printf("%lu,%lu,%lu,%lu,%lu,%.4f,%.4f,%lu,%.4f,%.4f,%lu,%lu,%lu,%lu,%.4f\n", cnt++, progress, normal_txn,
+                   rfa_txn, rounds, r_mb, w_mb, e_cnt, log_sz, log_write, log_flush_cnt, p1_us, p2_us, p3_us, db_sz);
     }
     spdlog::info("Transaction statistics: # completed txns: {} - # committed txns: {}", completed_txn,
                   statistics::total_committed_txn.load());
