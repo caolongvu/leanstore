@@ -35,12 +35,12 @@ DEFINE_bool(wal_fsync, true, "Force FSync for WAL");
 DEFINE_uint64(wal_buffer_size_mb, 10, "Size of WAL log buffer in MB");
 
 /* Configuration for commit protocols */
-DEFINE_uint32(wal_batch_write_kb, 16,
+DEFINE_uint32(wal_batch_write_kb, 4,
               "Workers only write WAL logs when the amount of unwritten logs are larger than this flag");
 DEFINE_uint32(wal_block_size_mb, 10, "The write granularity for workers to avoid contention");
 DEFINE_uint32(wal_max_idle_time_us, 30,
               "Force write when the avg idle time (from sampling) is larger than this number");
-DEFINE_uint32(wal_stealing_group_size, 8,
+DEFINE_uint32(wal_stealing_group_size, 1,
               "The size (number of workers) of the stealing group, in which "
               "workers can steal log entries from other peers in the same group");
 
