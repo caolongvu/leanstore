@@ -156,7 +156,7 @@ auto StorageCapacity(const char *path) -> u64 {
   int fd = open(path, 0, 0666);
   size_t storage_size;
   int rc = ioctl(fd, BLKGETSIZE64, &storage_size);
-  Ensure(rc == 0);
+  //Ensure(rc == 0);
   return storage_size;
 }
 

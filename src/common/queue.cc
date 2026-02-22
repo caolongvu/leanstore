@@ -1,6 +1,9 @@
 #include "common/queue.h"
 #include "common/rand.h"
 #include "common/utils.h"
+#include "leanstore/leanstore.h"
+#include "leanstore/statistics.h"
+#include "share_headers/time.h"
 #include "sync/hybrid_guard.h"
 #include "transaction/transaction.h"
 
@@ -15,12 +18,29 @@ namespace leanstore {
 template <typename T>
 LockFreeQueue<T>::LockFreeQueue() : buffer_capacity_(FLAGS_txn_queue_size_mb * MB) {
   assert(std::is_trivially_destructible_v<T>);
-  buffer_ = reinterpret_cast<u8 *>(AllocHuge(buffer_capacity_));
+  if (FLAGS_dynamic_resizing) {
+    first_block_                   = new QueueBlock();
+    first_block_.load()->last_used = tsctime::ReadTSC();
+    current_write_block_.store(first_block_.load());
+    current_read_block_.store(first_block_.load());
+  } else {
+    buffer_ = reinterpret_cast<u8 *>(AllocHuge(buffer_capacity_));
+  }
 }
 
 template <typename T>
 LockFreeQueue<T>::~LockFreeQueue() {
-  munmap(buffer_, buffer_capacity_);
+  if (FLAGS_dynamic_resizing) {
+    auto current = first_block_.load();
+    while (current != nullptr) {
+      auto next = current->next.load();
+      delete current;
+      current = next;
+    }
+
+  } else {
+    munmap(buffer_, buffer_capacity_);
+  }
 }
 
 /**
@@ -42,6 +62,236 @@ void LockFreeQueue<T>::Erase(u64 no_bytes) {
     r_head = no_bytes - (buffer_capacity_ - r_head);
   }
   head_.store(r_head);
+}
+
+/**
+ * @brief Push a serialized element to the queue from unserialized data with dynamic resizing
+ */
+
+template <typename T>
+template <typename T2>
+void LockFreeQueue<T>::Push_DR(const T2 &element) {
+  auto item_size = static_cast<uoffset_t>(element.SerializedSize());
+  auto w_block   = current_write_block_.load();
+  auto w_tail    = w_block->tail.load();
+
+  /* Circular buffer: no room for this element + a CR entry, so we circular back */
+  if (w_block->buffer_capacity - w_tail < item_size + sizeof(T::NULL_ITEM)) {
+    Ensure(w_block->buffer_capacity - w_tail >= sizeof(T::NULL_ITEM));
+    std::memcpy(&w_block->buffer[w_tail], &(T::NULL_ITEM), sizeof(T::NULL_ITEM));
+    w_tail = 0;
+  }
+
+  /* Allocate new queueblock */
+  auto r_head_w_block = w_block->head.load();
+  if (ContiguousFreeBytes(r_head_w_block, w_tail) < item_size + sizeof(T::JUMP_ITEM)) {
+    std::memcpy(&w_block->buffer[w_tail], &(T::JUMP_ITEM), sizeof(T::JUMP_ITEM));
+    if (w_block->next.load() != nullptr) {
+      current_write_block_.store(w_block->next.load());
+      w_block = current_write_block_.load();
+      w_tail  = w_block->tail.load();
+    } else {
+      QueueBlock *new_block = new QueueBlock();
+      w_block->next.store(new_block);
+      new_block->prev.store(w_block);
+      current_write_block_.store(new_block);
+      w_block = current_write_block_.load();
+      w_tail  = w_block->tail.load();
+    }
+  }
+
+  /* Have enough memory -> producer write the element to the buffer */
+  Ensure(w_tail % CPU_CACHELINE_SIZE == 0);
+  auto obj = reinterpret_cast<T *>(&w_block->buffer[w_tail]);
+  obj->Construct(element);
+  w_block->tail.store(w_tail + item_size);
+  w_block->no_txn++;
+
+  if (FLAGS_batch_looping) {
+    if (element.needs_remote_flush) {
+      auto w_pos = statistics::stats_w_pos[LeanStore::worker_thread_id].load();
+      auto idx   = w_pos & statistics::STATS_MASK;
+      // if (w_pos > statistics::STATS_SIZE) { std::cout << "Debug Push_DR : w_pos " << w_pos << " idx = " << idx <<
+      // std::endl; }
+      if (element.stats.precommit == 0) {
+        std::cout << "Debug Push_DR : element.stats.start = " << element.stats.start
+                  << " element.stats.precommit = " << element.stats.precommit
+                  << " element.stats.arrival_time = " << element.stats.arrival_time << std::endl;
+      }
+      statistics::precommited_txn_queued[LeanStore::worker_thread_id][idx] = {element.stats, element.state};
+      if (statistics::precommited_txn_queued[LeanStore::worker_thread_id][idx].stats.precommit == 0) {
+        std::cout << "Debug Push_DR : queue.stats.start = "
+                  << statistics::precommited_txn_queued[LeanStore::worker_thread_id][idx].stats.start
+                  << " queue.stats.precommit = "
+                  << statistics::precommited_txn_queued[LeanStore::worker_thread_id][idx].stats.precommit
+                  << " queue.stats.arrival_time = "
+                  << statistics::precommited_txn_queued[LeanStore::worker_thread_id][idx].stats.arrival_time
+                  << std::endl;
+      }
+      // std::cout << "Debug Push_DR : idx = " << idx << std::endl;
+      statistics::stats_w_pos[LeanStore::worker_thread_id].store(w_pos + 1);
+    } else {
+      auto w_pos = statistics::stats_w_pos_rfa[LeanStore::worker_thread_id].load();
+      // std::cout << "Debug Push_DR : w_pos = " << w_pos << std::endl;
+      auto idx                                                                 = w_pos & statistics::STATS_MASK;
+      statistics::precommited_txn_queued_rfa[LeanStore::worker_thread_id][idx] = {element.stats, element.state};
+      statistics::stats_w_pos_rfa[LeanStore::worker_thread_id].store(w_pos + 1);
+      /*std::cout << "Debug Push_DR : stats_w_pos_rfa = "
+                << statistics::stats_w_pos_rfa[LeanStore::worker_thread_id].load() << std::endl;*/
+    }
+  }
+  auto commit_stats = tsctime::ReadTSC();
+  w_block->last_used.store(commit_stats);
+  if (w_block->next.load() != nullptr) {
+    auto block_tbr      = w_block->next.load();
+    auto block_tbr_next = block_tbr->next.load();
+    while (tsctime::TscDifferenceNs(block_tbr->last_used.load(), commit_stats) >=
+           FLAGS_queueblock_removal_threshold * 1000000000ULL) {
+      Ensure(block_tbr->head.load() == 0 && block_tbr->no_txn.load() == 0);
+      block_tbr->prev.load()->next.store(block_tbr_next);
+      if (block_tbr_next != nullptr) { block_tbr_next->prev.store(block_tbr->prev.load()); }
+      delete block_tbr;
+      block_tbr = block_tbr_next;
+      if (block_tbr == nullptr) { break; }
+      block_tbr_next = block_tbr->next.load();
+    }
+  }
+}
+
+template <typename T>
+void LockFreeQueue<T>::Erase_DR(u64 no_bytes, u64 read_txn, QueueBlock *new_r_block) {
+  auto r_block = current_read_block_.load();
+  auto r_head  = r_block->head.load();
+
+  while (r_block != new_r_block) {
+    r_block->no_txn.store(0);
+    r_block->last_used.store(tsctime::ReadTSC());
+    r_block->head.store(0);
+    r_block->tail.store(0);
+    if (first_block_.load() == r_block) { first_block_.store(r_block->next.load()); }
+    if (r_block->prev.load() != nullptr) { r_block->prev.load()->next.store(r_block->next.load()); }
+    if (r_block->next.load() != nullptr) { r_block->next.load()->prev.store(r_block->prev.load()); }
+    auto current = first_block_.load();
+    while (current->next.load() != nullptr) { current = current->next.load(); }
+    current->next.store(r_block);
+    r_block = r_block->next.load();
+    r_head  = r_block->head.load();
+    current->next.load()->prev.store(current);
+    current->next.load()->next.store(nullptr);
+  }
+
+  if (r_head + no_bytes < r_block->buffer_capacity) {
+    r_head += no_bytes;
+  } else {
+    r_head = no_bytes - (r_block->buffer_capacity - r_head);
+  }
+  r_block->no_txn -= read_txn;
+  current_read_block_.store(r_block);
+  r_block->head.store(r_head);
+  r_block->last_used.store(tsctime::ReadTSC());
+}
+
+template <typename T>
+auto LockFreeQueue<T>::LoopElements_DR(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
+  -> std::tuple<u64, u64, QueueBlock *> {
+  auto r_block = current_read_block_.load();
+  auto r_head  = r_block->head.load();
+  u64 no_bytes = 0;
+  u64 read_txn = 0;
+
+  while (!(r_block == tail_block && r_head == until_tail)) {
+    if (T::InvalidByteBuffer(&r_block->buffer[r_head])) {
+      // std::cout << "Invalid Byte Size: " << r_block->buffer_capacity - r_head << std::endl;
+      no_bytes += r_block->buffer_capacity - r_head;
+      r_head = 0;
+    }
+    if (T::JumpByteBuffer(&r_block->buffer[r_head])) {
+      r_block->last_used.store(tsctime::ReadTSC());
+      r_block  = r_block->next.load();
+      r_head   = r_block->head.load();
+      no_bytes = 0;
+      read_txn = 0;
+      continue;
+    }
+    const auto item = reinterpret_cast<T *>(&r_block->buffer[r_head]);
+    /*if (item->state != transaction::Transaction::State::READY_TO_COMMIT) {
+                std::cout << "Debug GC: Txn State = " << static_cast<int>(item->state)
+                          << " Needs remote flush = " << item->needs_remote_flush
+                          << " Worker = " << LeanStore::worker_thread_id << std::endl;
+                }*/
+    if (!read_cb(*item)) { break; }
+    no_bytes += item->MemorySize();
+    read_txn++;
+    r_head += item->MemorySize();
+  }
+
+  r_block->last_used.store(tsctime::ReadTSC());
+
+  return std::make_tuple(no_bytes, read_txn, r_block);
+}
+
+template <typename T>
+auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
+  -> std::tuple<u64, u64, QueueBlock *, u64> {
+  auto r_block         = current_read_block_.load();
+  auto r_head          = r_block->head.load();
+  u64 no_bytes         = 0;
+  u64 read_txn         = 0;
+  u64 committed_txn_wb = 0;
+
+  while (true) {
+    if (T::InvalidByteBuffer(&r_block->buffer[r_head])) { r_head = 0; }
+    if (T::JumpByteBuffer(&r_block->buffer[r_head])) {
+      if (r_block == tail_block || r_block->next.load() == nullptr) { break; }
+      r_block = r_block->next.load();
+      r_head  = r_block->head.load();
+      continue;
+    }
+    const auto item = reinterpret_cast<T *>(&r_block->buffer[r_head]);
+    if (!read_cb(*item)) {
+      if (r_block->prev.load() != nullptr) {
+        r_block = r_block->prev.load();
+        r_head  = r_block->head.load();
+      }
+      break;
+    }
+    if (r_block == tail_block || r_block->next.load() == nullptr) { break; }
+    r_block = r_block->next.load();
+    r_head  = r_block->head.load();
+  }
+
+  auto current = current_read_block_.load();
+  while (current != r_block) {
+    committed_txn_wb += current->no_txn.load();
+    current = current->next.load();
+  }
+
+  while (!(r_block == tail_block && r_head == until_tail)) {
+    if (T::InvalidByteBuffer(&r_block->buffer[r_head])) {
+      no_bytes += r_block->buffer_capacity - r_head;
+      r_head = 0;
+    }
+    if (T::JumpByteBuffer(&r_block->buffer[r_head])) {
+      r_block  = r_block->next.load();
+      r_head   = r_block->head.load();
+      no_bytes = 0;
+      read_txn = 0;
+      continue;
+    }
+    const auto item = reinterpret_cast<T *>(&r_block->buffer[r_head]);
+    if (!read_cb(*item)) { break; }
+    if (static_cast<int>(item->state) != 2) {
+      std::cout << "Debug Batch Loop: item state = " << static_cast<int>(item->state) << std::endl;
+    }
+    no_bytes += item->MemorySize();
+    read_txn++;
+    committed_txn_wb++;
+    r_head += item->MemorySize();
+  }
+
+  if (committed_txn_wb > 20) { std::cout << "Debug Batch_Loop: committed_txn_wb = " << committed_txn_wb << " only 1 block = " << (current_read_block_ == current_write_block_) << std::endl; }
+
+  return std::make_tuple(no_bytes, read_txn, r_block, committed_txn_wb);
 }
 
 /**
@@ -116,5 +366,7 @@ auto ConcurrentQueue<T>::SizeApprox() -> size_t {
 
 template class ConcurrentQueue<transaction::Transaction>;
 template class LockFreeQueue<transaction::SerializableTransaction>;
+template void LockFreeQueue<transaction::SerializableTransaction>::Push_DR<leanstore::transaction::Transaction>(
+  const leanstore::transaction::Transaction &);
 
 }  // namespace leanstore

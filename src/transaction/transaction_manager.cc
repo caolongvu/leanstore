@@ -159,6 +159,7 @@ void TransactionManager::DurableCommit(T &txn, timestamp_t queue_phase_start) {
       statistics::txn_queue[LeanStore::worker_thread_id].emplace_back(
         tsctime::TscDifferenceNs(txn.stats.precommit, queue_phase_start));
       if (txn.needs_remote_flush) {
+        //std::cout << "Debug Durable commit: txn_latency = " << tsctime::TscDifferenceNs(txn.stats.start, commit_stats) << std::endl;
         statistics::txn_latency[LeanStore::worker_thread_id].emplace_back(
           tsctime::TscDifferenceNs(txn.stats.start, commit_stats));
       } else {
@@ -201,12 +202,20 @@ void TransactionManager::QueueTransaction(Transaction &txn) {
 
   /* Enabling lock-free queue */
   if (txn.needs_remote_flush) {
-    logger.precommitted_queue.Push(txn);
+    if (FLAGS_dynamic_resizing) {
+      logger.precommitted_queue.Push_DR(txn);
+    } else {
+      logger.precommitted_queue.Push(txn);
+    }
     if (start_profiling && txn.state != Transaction::State::BARRIER) {
       statistics::precommited_txn_processed[LeanStore::worker_thread_id] += 1;
     }
   } else {
-    logger.precommitted_queue_rfa.Push(txn);
+    if (FLAGS_dynamic_resizing) {
+      logger.precommitted_queue_rfa.Push_DR(txn);
+    } else {
+      logger.precommitted_queue_rfa.Push(txn);
+    }
     if (start_profiling && txn.state != Transaction::State::BARRIER) {
       statistics::precommited_rfa_txn_processed[LeanStore::worker_thread_id] += 1;
     }

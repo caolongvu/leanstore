@@ -13,6 +13,7 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <iostream>
 #include <limits>
 #include <type_traits>
 
@@ -25,8 +26,6 @@ class LockFreeQueue {
   LockFreeQueue();
   ~LockFreeQueue();
 
-  constexpr auto CurrentTail() -> u64 { return tail_.load(); }
-
   /**
    * @brief Push a serialized element to the queue from unserialized data
    */
@@ -34,6 +33,7 @@ class LockFreeQueue {
   void Push(const T2 &element) {
     auto item_size = static_cast<uoffset_t>(element.SerializedSize());
     auto w_tail    = tail_.load();
+    // std::printf("Item Size: %u bytes\n", item_size);
 
     /* Circular buffer: no room for this element + a CR entry, so we circular back */
     if (buffer_capacity_ - w_tail < item_size + sizeof(T::NULL_ITEM)) {
@@ -43,10 +43,20 @@ class LockFreeQueue {
     }
 
     /* Wait until the consumer accesses more items to free up some memory */
+    uint64_t yield_ns = 0, total_ns = 0;
+    auto start  = std::chrono::high_resolution_clock::now();
     auto r_head = head_.load();
+    /*if (ContiguousFreeBytes(r_head, w_tail) < 100) {
+      std::cout << "Debug Push : ContiguousFreeBytes = " << ContiguousFreeBytes(r_head, w_tail) << std::endl;
+    }*/
     while (ContiguousFreeBytes(r_head, w_tail) < item_size) {
-      r_head = head_.load();
+      auto y_start = std::chrono::high_resolution_clock::now();
+      r_head       = head_.load();
       AsmYield();
+      yield_ns +=
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - y_start)
+          .count();
+      std::cout << "Debug Push : yield_ns = " << yield_ns << std::endl;
     }
 
     /* Have enough memory -> producer write the element to the buffer */
@@ -54,25 +64,67 @@ class LockFreeQueue {
     auto obj = reinterpret_cast<T *>(&buffer_[w_tail]);
     obj->Construct(element);
     tail_.store(w_tail + item_size);
+    total_ns =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - start).count();
+    if (yield_ns > 0) std::printf("Total: %lu ns | Yield: %lu ns\n", total_ns, yield_ns);
   }
-
-  /* Erase and loop utilities */
-  void Erase(u64 no_bytes);
-  auto LoopElements(u64 until_tail, const std::function<bool(T &)> &read_cb) -> u64;
 
  private:
   FRIEND_TEST(TestQueue, BasicTest);
   FRIEND_TEST(TestQueue, ConcurrencyTest);
+
+  struct QueueBlock {
+    u8 *buffer;
+    u64 buffer_capacity;
+    std::atomic<u64> no_txn = 0;
+    std::atomic<uint64_t> last_used;
+    std::atomic<u64> head = {0}; /* Read from head */
+    std::atomic<u64> tail = {0}; /* Write to tail */
+
+    std::atomic<QueueBlock *> prev{nullptr};
+    std::atomic<QueueBlock *> next{nullptr};
+
+    QueueBlock() : buffer_capacity(FLAGS_txn_queue_size_mb * MB) {
+      buffer = reinterpret_cast<u8 *>(AllocHuge(buffer_capacity));
+    }
+
+    ~QueueBlock() { munmap(buffer, buffer_capacity); }
+  };
 
   u8 *buffer_;
   u64 buffer_capacity_;
   std::atomic<u64> head_ = {0}; /* Read from head */
   std::atomic<u64> tail_ = {0}; /* Write to tail */
 
+  std::atomic<QueueBlock *> current_read_block_;
+  std::atomic<QueueBlock *> current_write_block_;
+  std::atomic<QueueBlock *> first_block_;
+
   auto ContiguousFreeBytes(u64 r_head, u64 w_tail) -> u64 {
     // circulate the wal_cursor to the beginning and insert the whole entry
     return (w_tail < r_head) ? r_head - w_tail : buffer_capacity_ - w_tail;
   }
+
+ public:
+  constexpr auto CurrentTail() -> u64 { return tail_.load(); }
+
+  constexpr auto CurrentTail_DR() -> u64 { return current_write_block_.load()->tail.load(); }
+
+  auto CurrentWriteBlock_DR() -> QueueBlock * { return current_write_block_.load(); }
+
+  auto CurrentReadBlock_DR() -> QueueBlock * { return current_read_block_.load(); }
+
+  /* Erase and loop utilities */
+  void Erase(u64 no_bytes);
+  auto LoopElements(u64 until_tail, const std::function<bool(T &)> &read_cb) -> u64;
+
+  template <typename T2>
+  void Push_DR(const T2 &element);
+  void Erase_DR(u64 no_bytes, u64 read_txn, QueueBlock *new_r_block);
+  auto LoopElements_DR(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
+    -> std::tuple<u64, u64, QueueBlock *>;
+  auto Batch_Loop(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
+    -> std::tuple<u64, u64, QueueBlock *, u64>;
 };
 
 template <class T>

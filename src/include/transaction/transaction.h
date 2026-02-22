@@ -130,6 +130,7 @@ class Transaction {
 
 struct alignas(CPU_CACHELINE_SIZE) SerializableTransaction {
   static constexpr u8 NULL_ITEM = std::numeric_limits<u8>::max();
+  static constexpr u8 JUMP_ITEM = std::numeric_limits<u8>::max() - 1;
 
   Transaction::State state = {Transaction::State::IDLE};
 
@@ -159,6 +160,8 @@ struct alignas(CPU_CACHELINE_SIZE) SerializableTransaction {
   auto MemorySize() -> uoffset_t;
 
   static auto InvalidByteBuffer(const u8 *buffer) -> bool;
+
+  static auto JumpByteBuffer(const u8 *buffer) -> bool;
 
   // -------------------------------------------------------------------------------------
   auto ToFlushedLargePages() const -> std::span<const storage::LargePage> {

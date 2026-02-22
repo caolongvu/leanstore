@@ -43,6 +43,9 @@ auto SerializableTransaction::DepGSN() const -> std::span<const timestamp_t> {
 /** Whether the given byte buffer does not store a valid SerializableTransaction */
 auto SerializableTransaction::InvalidByteBuffer(const u8 *buffer) -> bool { return buffer[0] == NULL_ITEM; }
 
+/** Whether the given byte buffer stores a JUMP_ITEM */
+auto SerializableTransaction::JumpByteBuffer(const u8 *buffer) -> bool { return buffer[0] == JUMP_ITEM; }
+
 /* Should be in-sync with Transaction::SerializedSize() */
 auto SerializableTransaction::MemorySize() -> u16 {
   auto vector_mem_size = (FLAGS_wal_variant != LoggingVariant::VECTOR) ? 0 : Transaction::VECTOR_KEY_SIZE * vector_size;

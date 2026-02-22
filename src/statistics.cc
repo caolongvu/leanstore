@@ -4,20 +4,26 @@
 
 namespace leanstore::statistics {
 
-std::atomic<u64> total_committed_txn                                 = 0;
-std::atomic<u64> txn_processed[MAX_NUMBER_OF_WORKER]                 = {};
-std::atomic<u64> commit_rounds[MAX_NUMBER_OF_WORKER]                 = {};
-std::vector<u64> txn_per_round[MAX_NUMBER_OF_WORKER]                 = {};
-std::atomic<u64> precommited_txn_processed[MAX_NUMBER_OF_WORKER]     = {};
-std::atomic<u64> precommited_rfa_txn_processed[MAX_NUMBER_OF_WORKER] = {};
-std::vector<u64> txn_latency[MAX_NUMBER_OF_WORKER]                   = {};
-std::vector<u64> rfa_txn_latency[MAX_NUMBER_OF_WORKER]               = {};
-std::vector<u64> lat_inc_wait[MAX_NUMBER_OF_WORKER]                  = {};
-std::vector<u64> txn_queue[MAX_NUMBER_OF_WORKER]                     = {};
-std::vector<u64> txn_exec[MAX_NUMBER_OF_WORKER]                      = {};
-std::vector<u64> io_latency[MAX_NUMBER_OF_WORKER]                    = {};
-std::atomic<u64> log_flush_cnt[MAX_NUMBER_OF_WORKER]                 = {};
-std::array<i64, SAMPLING_SIZE> worker_idle_ns[MAX_NUMBER_OF_WORKER]  = {};
+std::atomic<u64> total_committed_txn                                                  = 0;
+std::atomic<u64> txn_processed[MAX_NUMBER_OF_WORKER]                                  = {};
+std::atomic<u64> commit_rounds[MAX_NUMBER_OF_WORKER]                                  = {};
+std::vector<u64> txn_per_round[MAX_NUMBER_OF_WORKER]                                  = {};
+std::atomic<u64> precommited_txn_processed[MAX_NUMBER_OF_WORKER]                      = {};
+std::atomic<u64> precommited_rfa_txn_processed[MAX_NUMBER_OF_WORKER]                  = {};
+std::vector<u64> txn_latency[MAX_NUMBER_OF_WORKER]                                    = {};
+std::vector<u64> rfa_txn_latency[MAX_NUMBER_OF_WORKER]                                = {};
+std::vector<u64> lat_inc_wait[MAX_NUMBER_OF_WORKER]                                   = {};
+std::vector<u64> txn_queue[MAX_NUMBER_OF_WORKER]                                      = {};
+std::vector<u64> txn_exec[MAX_NUMBER_OF_WORKER]                                       = {};
+std::vector<u64> io_latency[MAX_NUMBER_OF_WORKER]                                     = {};
+std::atomic<u64> log_flush_cnt[MAX_NUMBER_OF_WORKER]                                  = {};
+std::array<i64, SAMPLING_SIZE> worker_idle_ns[MAX_NUMBER_OF_WORKER]                   = {};
+batch_looping_statistics precommited_txn_queued[MAX_NUMBER_OF_WORKER][STATS_SIZE]     = {};
+std::atomic<u64> stats_w_pos[MAX_NUMBER_OF_WORKER]                                    = {};
+std::atomic<u64> stats_r_pos[MAX_NUMBER_OF_WORKER]                                    = {};
+batch_looping_statistics precommited_txn_queued_rfa[MAX_NUMBER_OF_WORKER][STATS_SIZE] = {};
+std::atomic<u64> stats_w_pos_rfa[MAX_NUMBER_OF_WORKER]                                = {};
+std::atomic<u64> stats_r_pos_rfa[MAX_NUMBER_OF_WORKER]                                = {};
 
 namespace buffer {
 std::atomic<u64> read_cnt  = 0;
