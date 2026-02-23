@@ -205,45 +205,26 @@ void GroupCommitExecutor::PhaseThree() {
 
         if (!(loop_bytes == 0 && read_txn == 0 && new_r_block == logger.precommitted_queue.CurrentReadBlock_DR() &&
               committed_txn_wb == 0)) {
-          auto old_r_head = logger.precommitted_queue.CurrentReadBlock_DR()->head.load();
-
           logger.precommitted_queue.Erase_DR(loop_bytes, read_txn, new_r_block);
 
-          auto r_head = logger.precommitted_queue.CurrentReadBlock_DR()->head.load();
-          auto erased_bytes =
-            ((r_head > old_r_head)
-               ? r_head - old_r_head
-               : r_head + logger.precommitted_queue.CurrentReadBlock_DR()->buffer_capacity - old_r_head);
-          if (erased_bytes != loop_bytes) {
-            std::cout << "Debug GC: Erased bytes = " << erased_bytes << " loop_bytes = " << loop_bytes << std::endl;
-          }
-          auto r_pos = statistics::stats_r_pos[w_i].load();
-
+          auto r_pos        = statistics::stats_r_pos[w_i].load();
+          auto commit_stats = tsctime::ReadTSC();
           for (size_t i = 0; i < committed_txn_wb; i++) {
-            //if (committed_txn_wb > 20) { std::cout << " committed_txn_wb = " << committed_txn_wb << std::endl; }
             auto idx      = (r_pos + i) & statistics::STATS_MASK;
             auto stat_txn = statistics::precommited_txn_queued[LeanStore::worker_thread_id][idx];
 
-            /* if (stat_txn.stats.precommit != 0) {
-                 std::cout << "Debug GC : i = " << i
-                             << " committed_txn_wb = " << committed_txn_wb
-                             << " idx = " << idx << std::endl;
-               }*/
             if (stat_txn.state != transaction::Transaction::State::BARRIER) {
               completed_txn_++;
 
               stat_txn.state = transaction::Transaction::State::COMMITTED;
               if (FLAGS_txn_debug) {
                 if (start_profiling_latency) {
-                  /*std::cout << "Debug GC : stat_txn.stats.start = " << stat_txn.stats.start
-                            << " stat_txn.stats.precommit = " << stat_txn.stats.precommit
-                            << " stat_txn.stats.arrival_time = " << stat_txn.stats.arrival_time << std::endl;*/
-
-                  auto commit_stats = tsctime::ReadTSC();
+                  Ensure(stat_txn.stats.precommit > 0);
                   statistics::txn_queue[LeanStore::worker_thread_id].emplace_back(
                     tsctime::TscDifferenceNs(stat_txn.stats.precommit, phase_2_begin_));
-                  // std::cout << "Debug GC: txn_latency = " << tsctime::TscDifferenceNs(stat_txn.stats.start,
-                  // commit_stats) << std::endl;
+                  if (tsctime::TscDifferenceNs(stat_txn.stats.precommit, phase_2_begin_) > 3220611343) {
+                    std::cout << stat_txn.stats.precommit << std::endl;
+                  }
                   statistics::txn_latency[LeanStore::worker_thread_id].emplace_back(
                     tsctime::TscDifferenceNs(stat_txn.stats.start, commit_stats));
 
@@ -264,18 +245,18 @@ void GroupCommitExecutor::PhaseThree() {
         if (!(loop_bytes == 0 && read_txn == 0 && new_r_block == logger.precommitted_queue_rfa.CurrentReadBlock_DR() &&
               committed_txn_wb == 0)) {
           logger.precommitted_queue_rfa.Erase_DR(loop_bytes, read_txn, new_r_block);
-          auto r_pos        = statistics::stats_r_pos_rfa[w_i].load();
+          auto r_pos        = statistics::stats_r_pos[w_i].load();
           auto commit_stats = tsctime::ReadTSC();
-          for (size_t i = r_pos; i < r_pos + committed_txn_wb; i++) {
-            auto stat_txn = statistics::precommited_txn_queued_rfa[LeanStore::worker_thread_id][i];
+          for (size_t i = 0; i < committed_txn_wb; i++) {
+            auto idx      = (r_pos + i) & statistics::STATS_MASK;
+            auto stat_txn = statistics::precommited_txn_queued[LeanStore::worker_thread_id][idx];
+
             if (stat_txn.state != transaction::Transaction::State::BARRIER) {
               completed_txn_++;
               stat_txn.state = transaction::Transaction::State::COMMITTED;
               if (FLAGS_txn_debug) {
                 if (start_profiling_latency) {
-                  /*std::cout << "Debug GC RFA: stat_txn.stats.start = " << stat_txn.stats.start
-                           << " stat_txn.stats.precommit = " << stat_txn.stats.precommit
-                           << " stat_txn.stats.arrival_time = " << stat_txn.stats.arrival_time << std::endl;*/
+                  Ensure(stat_txn.stats.precommit > 0);
 
                   statistics::txn_queue[LeanStore::worker_thread_id].emplace_back(
                     tsctime::TscDifferenceNs(stat_txn.stats.precommit, phase_2_begin_));
@@ -294,7 +275,7 @@ void GroupCommitExecutor::PhaseThree() {
           statistics::stats_r_pos_rfa[w_i].store(r_pos + committed_txn_wb);
         }
       } else {
-        auto [loop_bytes, read_txn, new_r_block] = logger.precommitted_queue.LoopElements_DR(
+        auto [loop_bytes, read_txn, new_r_block, committed_txn_wb] = logger.precommitted_queue.LoopElements_DR(
           ready_to_commit_cut_[w_i], logger.precommitted_queue.CurrentWriteBlock_DR(), [&](auto &txn) {
             if (SatisfyCommitConditions(w_i, txn)) {
               if (txn.state != transaction::Transaction::State::BARRIER) {
@@ -306,25 +287,14 @@ void GroupCommitExecutor::PhaseThree() {
             }
             return false;
           });
-        // if (loop_bytes > 0) { std::cout << "Debug GC: loop_bytes = " << loop_bytes << std::endl; }
         if (!(loop_bytes == 0 && read_txn == 0 && new_r_block == logger.precommitted_queue.CurrentReadBlock_DR())) {
-          auto old_r_head = logger.precommitted_queue.CurrentReadBlock_DR()->head.load();
           logger.precommitted_queue.Erase_DR(loop_bytes, read_txn, new_r_block);
-          auto r_head = logger.precommitted_queue.CurrentReadBlock_DR()->head.load();
-          auto erased_bytes =
-            ((r_head > old_r_head)
-               ? r_head - old_r_head
-               : r_head + logger.precommitted_queue.CurrentReadBlock_DR()->buffer_capacity - old_r_head);
-          if (erased_bytes != loop_bytes) {
-            std::cout << "Debug GC: Erased bytes = " << erased_bytes << " loop_bytes = " << loop_bytes << std::endl;
-          }
-
           completed_txn_ += committed_txn;
         }
 
         /* Process RFA-transaction queue */
-        committed_txn                               = 0;
-        std::tie(loop_bytes, read_txn, new_r_block) = logger.precommitted_queue_rfa.LoopElements_DR(
+        committed_txn                                                 = 0;
+        std::tie(loop_bytes, read_txn, new_r_block, committed_txn_wb) = logger.precommitted_queue_rfa.LoopElements_DR(
           ready_to_commit_rfa_cut_[w_i], logger.precommitted_queue_rfa.CurrentWriteBlock_DR(), [&](auto &txn) {
             if (txn.commit_ts <= worker_states_[w_i].precommitted_tx_commit_ts) [[likely]] {
               assert(txn.state != transaction::Transaction::State::BARRIER);
@@ -340,7 +310,7 @@ void GroupCommitExecutor::PhaseThree() {
         }
       }
     } else {
-      auto loop_bytes = logger.precommitted_queue.LoopElements(ready_to_commit_cut_[w_i], [&](auto &txn) {
+      auto [loop_bytes, no_txn] = logger.precommitted_queue.LoopElements(ready_to_commit_cut_[w_i], [&](auto &txn) {
         if (SatisfyCommitConditions(w_i, txn)) {
           if (txn.state != transaction::Transaction::State::BARRIER) {
             committed_txn++;
@@ -351,13 +321,13 @@ void GroupCommitExecutor::PhaseThree() {
         return false;
       });
       if (loop_bytes > 0) {
-        logger.precommitted_queue.Erase(loop_bytes);
+        logger.precommitted_queue.Erase(loop_bytes, no_txn);
         completed_txn_ += committed_txn;
       }
 
       /* Process RFA-transaction queue */
       committed_txn = 0;
-      loop_bytes    = logger.precommitted_queue_rfa.LoopElements(ready_to_commit_rfa_cut_[w_i], [&](auto &txn) {
+      std::tie(loop_bytes, no_txn)    = logger.precommitted_queue_rfa.LoopElements(ready_to_commit_rfa_cut_[w_i], [&](auto &txn) {
         if (txn.commit_ts <= worker_states_[w_i].precommitted_tx_commit_ts) [[likely]] {
           assert(txn.state != transaction::Transaction::State::BARRIER);
           committed_txn++;
@@ -367,7 +337,7 @@ void GroupCommitExecutor::PhaseThree() {
         return false;
       });
       if (loop_bytes > 0) {
-        logger.precommitted_queue_rfa.Erase(loop_bytes);
+        logger.precommitted_queue_rfa.Erase(loop_bytes, no_txn);
         completed_txn_ += committed_txn;
       }
     }
@@ -442,7 +412,9 @@ void GroupCommitExecutor::PrepareLargePageWrite(const transaction::SerializableT
 }
 
 void GroupCommitExecutor::CompleteTransaction(transaction::SerializableTransaction &txn) {
-  Ensure(txn.state == transaction::Transaction::State::READY_TO_COMMIT);
+  if (txn.state != transaction::Transaction::State::READY_TO_COMMIT) {
+    std::cout << static_cast<int>(txn.state) << std::endl;
+  };
   if (FLAGS_blob_enable) {
     for (auto &lp : txn.ToFlushedLargePages()) { completed_lp_.remove(lp.start_pid); }
     buffer_->FreeStorageManager()->PublicFreeExtents(txn.ToFreeExtents());

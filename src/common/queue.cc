@@ -16,7 +16,7 @@ namespace leanstore {
 // ----------------------------------------------------------------------------------------------
 
 template <typename T>
-LockFreeQueue<T>::LockFreeQueue() : buffer_capacity_(FLAGS_txn_queue_size_mb * MB) {
+LockFreeQueue<T>::LockFreeQueue() : buffer_capacity_(FLAGS_txn_queue_size_mb) {
   assert(std::is_trivially_destructible_v<T>);
   if (FLAGS_dynamic_resizing) {
     first_block_                   = new QueueBlock();
@@ -52,7 +52,7 @@ LockFreeQueue<T>::~LockFreeQueue() {
  * - Erase(): Remove `n_items` from SizeApprox() and `no_bytes` from LoopElement()
  */
 template <typename T>
-void LockFreeQueue<T>::Erase(u64 no_bytes) {
+void LockFreeQueue<T>::Erase(u64 no_bytes, u64 no_txn) {
   if (no_bytes <= 0) { return; }
   auto r_head = head_.load();
 
@@ -62,6 +62,8 @@ void LockFreeQueue<T>::Erase(u64 no_bytes) {
     r_head = no_bytes - (buffer_capacity_ - r_head);
   }
   head_.store(r_head);
+  no_txn_ -= no_txn;
+
 }
 
 /**
@@ -87,10 +89,12 @@ void LockFreeQueue<T>::Push_DR(const T2 &element) {
   if (ContiguousFreeBytes(r_head_w_block, w_tail) < item_size + sizeof(T::JUMP_ITEM)) {
     std::memcpy(&w_block->buffer[w_tail], &(T::JUMP_ITEM), sizeof(T::JUMP_ITEM));
     if (w_block->next.load() != nullptr) {
+      //std::cout << "Next Block" << std::endl;
       current_write_block_.store(w_block->next.load());
       w_block = current_write_block_.load();
       w_tail  = w_block->tail.load();
     } else {
+      //std::cout << "New Block" << std::endl;
       QueueBlock *new_block = new QueueBlock();
       w_block->next.store(new_block);
       new_block->prev.store(w_block);
@@ -107,39 +111,20 @@ void LockFreeQueue<T>::Push_DR(const T2 &element) {
   w_block->tail.store(w_tail + item_size);
   w_block->no_txn++;
 
-  if (FLAGS_batch_looping) {
-    if (element.needs_remote_flush) {
-      auto w_pos = statistics::stats_w_pos[LeanStore::worker_thread_id].load();
-      auto idx   = w_pos & statistics::STATS_MASK;
-      // if (w_pos > statistics::STATS_SIZE) { std::cout << "Debug Push_DR : w_pos " << w_pos << " idx = " << idx <<
-      // std::endl; }
-      if (element.stats.precommit == 0) {
-        std::cout << "Debug Push_DR : element.stats.start = " << element.stats.start
-                  << " element.stats.precommit = " << element.stats.precommit
-                  << " element.stats.arrival_time = " << element.stats.arrival_time << std::endl;
-      }
-      statistics::precommited_txn_queued[LeanStore::worker_thread_id][idx] = {element.stats, element.state};
-      if (statistics::precommited_txn_queued[LeanStore::worker_thread_id][idx].stats.precommit == 0) {
-        std::cout << "Debug Push_DR : queue.stats.start = "
-                  << statistics::precommited_txn_queued[LeanStore::worker_thread_id][idx].stats.start
-                  << " queue.stats.precommit = "
-                  << statistics::precommited_txn_queued[LeanStore::worker_thread_id][idx].stats.precommit
-                  << " queue.stats.arrival_time = "
-                  << statistics::precommited_txn_queued[LeanStore::worker_thread_id][idx].stats.arrival_time
-                  << std::endl;
-      }
-      // std::cout << "Debug Push_DR : idx = " << idx << std::endl;
-      statistics::stats_w_pos[LeanStore::worker_thread_id].store(w_pos + 1);
-    } else {
-      auto w_pos = statistics::stats_w_pos_rfa[LeanStore::worker_thread_id].load();
-      // std::cout << "Debug Push_DR : w_pos = " << w_pos << std::endl;
-      auto idx                                                                 = w_pos & statistics::STATS_MASK;
-      statistics::precommited_txn_queued_rfa[LeanStore::worker_thread_id][idx] = {element.stats, element.state};
-      statistics::stats_w_pos_rfa[LeanStore::worker_thread_id].store(w_pos + 1);
-      /*std::cout << "Debug Push_DR : stats_w_pos_rfa = "
-                << statistics::stats_w_pos_rfa[LeanStore::worker_thread_id].load() << std::endl;*/
-    }
+  if (element.needs_remote_flush) {
+    auto w_pos = statistics::stats_w_pos[LeanStore::worker_thread_id].load();
+    auto idx   = w_pos & statistics::STATS_MASK;
+
+    statistics::precommited_txn_queued[LeanStore::worker_thread_id][idx] = {element.stats, element.state};
+
+    statistics::stats_w_pos[LeanStore::worker_thread_id].store(w_pos + 1);
+  } else {
+    auto w_pos = statistics::stats_w_pos_rfa[LeanStore::worker_thread_id].load();
+    auto idx   = w_pos & statistics::STATS_MASK;
+    statistics::precommited_txn_queued_rfa[LeanStore::worker_thread_id][idx] = {element.stats, element.state};
+    statistics::stats_w_pos_rfa[LeanStore::worker_thread_id].store(w_pos + 1);
   }
+
   auto commit_stats = tsctime::ReadTSC();
   w_block->last_used.store(commit_stats);
   if (w_block->next.load() != nullptr) {
@@ -193,15 +178,15 @@ void LockFreeQueue<T>::Erase_DR(u64 no_bytes, u64 read_txn, QueueBlock *new_r_bl
 
 template <typename T>
 auto LockFreeQueue<T>::LoopElements_DR(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
-  -> std::tuple<u64, u64, QueueBlock *> {
-  auto r_block = current_read_block_.load();
-  auto r_head  = r_block->head.load();
-  u64 no_bytes = 0;
-  u64 read_txn = 0;
+  -> std::tuple<u64, u64, QueueBlock *, u64> {
+  auto r_block         = current_read_block_.load();
+  auto r_head          = r_block->head.load();
+  u64 no_bytes         = 0;
+  u64 read_txn         = 0;
+  u64 committed_txn_wb = 0;
 
   while (!(r_block == tail_block && r_head == until_tail)) {
     if (T::InvalidByteBuffer(&r_block->buffer[r_head])) {
-      // std::cout << "Invalid Byte Size: " << r_block->buffer_capacity - r_head << std::endl;
       no_bytes += r_block->buffer_capacity - r_head;
       r_head = 0;
     }
@@ -214,12 +199,9 @@ auto LockFreeQueue<T>::LoopElements_DR(u64 until_tail, QueueBlock *tail_block, c
       continue;
     }
     const auto item = reinterpret_cast<T *>(&r_block->buffer[r_head]);
-    /*if (item->state != transaction::Transaction::State::READY_TO_COMMIT) {
-                std::cout << "Debug GC: Txn State = " << static_cast<int>(item->state)
-                          << " Needs remote flush = " << item->needs_remote_flush
-                          << " Worker = " << LeanStore::worker_thread_id << std::endl;
-                }*/
+
     if (!read_cb(*item)) { break; }
+    committed_txn_wb++;
     no_bytes += item->MemorySize();
     read_txn++;
     r_head += item->MemorySize();
@@ -227,7 +209,7 @@ auto LockFreeQueue<T>::LoopElements_DR(u64 until_tail, QueueBlock *tail_block, c
 
   r_block->last_used.store(tsctime::ReadTSC());
 
-  return std::make_tuple(no_bytes, read_txn, r_block);
+  return std::make_tuple(no_bytes, read_txn, r_block, committed_txn_wb);
 }
 
 template <typename T>
@@ -280,16 +262,12 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
     }
     const auto item = reinterpret_cast<T *>(&r_block->buffer[r_head]);
     if (!read_cb(*item)) { break; }
-    if (static_cast<int>(item->state) != 2) {
-      std::cout << "Debug Batch Loop: item state = " << static_cast<int>(item->state) << std::endl;
-    }
+
     no_bytes += item->MemorySize();
     read_txn++;
     committed_txn_wb++;
     r_head += item->MemorySize();
   }
-
-  if (committed_txn_wb > 20) { std::cout << "Debug Batch_Loop: committed_txn_wb = " << committed_txn_wb << " only 1 block = " << (current_read_block_ == current_write_block_) << std::endl; }
 
   return std::make_tuple(no_bytes, read_txn, r_block, committed_txn_wb);
 }
@@ -303,9 +281,10 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
  * The queue may also stop looping if it reaches the last queued item, i.e., r_head == until_tail
  */
 template <typename T>
-auto LockFreeQueue<T>::LoopElements(u64 until_tail, const std::function<bool(T &)> &read_cb) -> u64 {
+auto LockFreeQueue<T>::LoopElements(u64 until_tail, const std::function<bool(T &)> &read_cb) -> std::tuple<u64, u64> {
   auto r_head   = head_.load();
   auto old_head = r_head;
+  auto no_txn   = 0;
 
   for (auto idx = 0UL; r_head != until_tail; idx++) {
     assert(r_head != until_tail);
@@ -316,9 +295,10 @@ auto LockFreeQueue<T>::LoopElements(u64 until_tail, const std::function<bool(T &
     const auto item = reinterpret_cast<T *>(&buffer_[r_head]);
     if (!read_cb(*item)) { break; }
     r_head += item->MemorySize();
+    no_txn++;
   }
 
-  return (r_head > old_head) ? r_head - old_head : r_head + buffer_capacity_ - old_head;
+  return std::make_tuple(((r_head > old_head) ? r_head - old_head : r_head + buffer_capacity_ - old_head), no_txn);
 }
 
 // ----------------------------------------------------------------------------------------------
