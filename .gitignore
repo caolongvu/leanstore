@@ -1,4 +1,5 @@
 build/
+build_debug/
 release/
 benchmark/src/wikipedia/config.cc
 benchmark/src/gitclone/config.cc

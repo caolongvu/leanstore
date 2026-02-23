@@ -32,7 +32,7 @@ class LockFreeQueue {
   template <typename T2>
   void Push(const T2 &element) {
     auto item_size = static_cast<uoffset_t>(element.SerializedSize());
-    auto w_tail    = tail_.load();
+    auto w_tail    = tail_.load(std::memory_order_acquire);
     // std::printf("Item Size: %u bytes\n", item_size);
 
     /* Circular buffer: no room for this element + a CR entry, so we circular back */
@@ -45,15 +45,15 @@ class LockFreeQueue {
     /* Wait until the consumer accesses more items to free up some memory */
     uint64_t yield_ns = 0, total_ns = 0;
     auto start  = std::chrono::high_resolution_clock::now();
-    auto r_head = head_.load();
+    auto r_head = head_.load(std::memory_order_acquire);
     // std::cout << "Debug Push : NoSpace = " << NoSpace(r_head, w_tail, item_size) << std::endl;
 
-    while (NoSpace(r_head, w_tail, item_size)) {
+    while (NoSpace(r_head, w_tail, item_size, no_txn_.load(std::memory_order_acquire))) {
       /*std::cout << "r_head = " << r_head << " w_tail = " << w_tail << " item_size = " << item_size
               << " no_txn_ = " << no_txn_ << std::endl;
       break;*/
       auto y_start = std::chrono::high_resolution_clock::now();
-      r_head       = head_.load();
+      r_head       = head_.load(std::memory_order_acquire);
       AsmYield();
       yield_ns +=
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - y_start)
@@ -64,12 +64,12 @@ class LockFreeQueue {
     Ensure(w_tail % CPU_CACHELINE_SIZE == 0);
     auto obj = reinterpret_cast<T *>(&buffer_[w_tail]);
     obj->Construct(element);
-    tail_.store(w_tail + item_size);
-    no_txn_++;
+    no_txn_.fetch_add(1, std::memory_order_release);
+    tail_.store(w_tail + item_size, std::memory_order_release);
 
     total_ns =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - start).count();
-    //if (yield_ns > 0) { std::printf("Total: %lu ns | Yield: %lu ns\n", total_ns, yield_ns); }
+    // if (yield_ns > 0) { std::printf("Total: %lu ns | Yield: %lu ns\n", total_ns, yield_ns); }
   }
 
  private:
@@ -109,24 +109,24 @@ class LockFreeQueue {
     return (w_tail < r_head) ? r_head - w_tail : buffer_capacity_ - w_tail;
   }
 
-  auto NoSpace(u64 r_head, u64 w_tail, u64 item_size) -> bool {
+  auto NoSpace(u64 r_head, u64 w_tail, u64 space_needed, u64 no_txn) -> bool {
     if (w_tail < r_head) {
-      return (r_head - w_tail) < item_size;
+      return (r_head - w_tail) < space_needed;
     } else if (w_tail == r_head) {
-      return no_txn_ > 0;
+      return no_txn > 0;
     } else {
       return false;
     }
   }
 
  public:
-  constexpr auto CurrentTail() -> u64 { return tail_.load(); }
+  constexpr auto CurrentTail() -> u64 { return tail_.load(std::memory_order_acquire); }
 
-  constexpr auto CurrentTail_DR() -> u64 { return current_write_block_.load()->tail.load(); }
+  constexpr auto CurrentTail_DR() -> u64 { return current_write_block_.load(std::memory_order_acquire)->tail.load(std::memory_order_acquire); }
 
-  auto CurrentWriteBlock_DR() -> QueueBlock * { return current_write_block_.load(); }
+  auto CurrentWriteBlock_DR() -> QueueBlock * { return current_write_block_.load(std::memory_order_acquire); }
 
-  auto CurrentReadBlock_DR() -> QueueBlock * { return current_read_block_.load(); }
+  auto CurrentReadBlock_DR() -> QueueBlock * { return current_read_block_.load(std::memory_order_acquire); }
 
   /* Erase and loop utilities */
   void Erase(u64 no_bytes, u64 no_txn);
