@@ -9,12 +9,11 @@
 
 namespace leanstore::statistics {
 
-static constexpr u64 STATS_SIZE = 1 << 16;
-static constexpr u64 STATS_MASK = STATS_SIZE - 1;
 
-struct batch_looping_statistics {
-  transaction::Transaction::Statistics stats;
-  transaction::Transaction::State state;
+struct txn_statistics_committed {
+  u64 committed_txn;
+  timestamp_t commit_stats;
+  timestamp_t phase_2_begin;
 };
 
 extern std::atomic<u64> total_committed_txn;
@@ -31,12 +30,11 @@ extern std::vector<u64> txn_exec[MAX_NUMBER_OF_WORKER];
 extern std::vector<u64> io_latency[MAX_NUMBER_OF_WORKER];
 extern std::atomic<u64> log_flush_cnt[MAX_NUMBER_OF_WORKER];
 extern std::array<i64, SAMPLING_SIZE> worker_idle_ns[MAX_NUMBER_OF_WORKER];
-extern batch_looping_statistics precommited_txn_queued[MAX_NUMBER_OF_WORKER][STATS_SIZE];
-extern std::atomic<u64> stats_w_pos[MAX_NUMBER_OF_WORKER];
-extern std::atomic<u64> stats_r_pos[MAX_NUMBER_OF_WORKER];
-extern batch_looping_statistics precommited_txn_queued_rfa[MAX_NUMBER_OF_WORKER][STATS_SIZE];
-extern std::atomic<u64> stats_w_pos_rfa[MAX_NUMBER_OF_WORKER];
-extern std::atomic<u64> stats_r_pos_rfa[MAX_NUMBER_OF_WORKER];
+extern std::vector<transaction::Transaction::Statistics> txn_stats[MAX_NUMBER_OF_WORKER];
+extern std::vector<txn_statistics_committed> txn_stats_committed[MAX_NUMBER_OF_WORKER];
+extern std::vector<transaction::Transaction::Statistics> txn_stats_rfa[MAX_NUMBER_OF_WORKER];
+extern std::vector<txn_statistics_committed> txn_stats_rfa_committed[MAX_NUMBER_OF_WORKER];
+
 
 
 namespace buffer {

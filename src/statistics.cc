@@ -18,12 +18,10 @@ std::vector<u64> txn_exec[MAX_NUMBER_OF_WORKER]                                 
 std::vector<u64> io_latency[MAX_NUMBER_OF_WORKER]                                     = {};
 std::atomic<u64> log_flush_cnt[MAX_NUMBER_OF_WORKER]                                  = {};
 std::array<i64, SAMPLING_SIZE> worker_idle_ns[MAX_NUMBER_OF_WORKER]                   = {};
-batch_looping_statistics precommited_txn_queued[MAX_NUMBER_OF_WORKER][STATS_SIZE]     = {};
-std::atomic<u64> stats_w_pos[MAX_NUMBER_OF_WORKER]                                    = {};
-std::atomic<u64> stats_r_pos[MAX_NUMBER_OF_WORKER]                                    = {};
-batch_looping_statistics precommited_txn_queued_rfa[MAX_NUMBER_OF_WORKER][STATS_SIZE] = {};
-std::atomic<u64> stats_w_pos_rfa[MAX_NUMBER_OF_WORKER]                                = {};
-std::atomic<u64> stats_r_pos_rfa[MAX_NUMBER_OF_WORKER]                                = {};
+std::vector<transaction::Transaction::Statistics> txn_stats[MAX_NUMBER_OF_WORKER]     = {};
+std::vector<txn_statistics_committed> txn_stats_committed[MAX_NUMBER_OF_WORKER]       = {};
+std::vector<transaction::Transaction::Statistics> txn_stats_rfa[MAX_NUMBER_OF_WORKER] = {};
+std::vector<txn_statistics_committed> txn_stats_rfa_committed[MAX_NUMBER_OF_WORKER]   = {};
 
 namespace buffer {
 std::atomic<u64> read_cnt  = 0;

@@ -80,6 +80,7 @@ class LockFreeQueue {
     u8 *buffer;
     u64 buffer_capacity;
     std::atomic<u64> no_txn = 0;
+    std::atomic<u64> no_txn_b = 0;
     std::atomic<uint64_t> last_used;
     std::atomic<u64> head = {0}; /* Read from head */
     std::atomic<u64> tail = {0}; /* Write to tail */
@@ -136,11 +137,11 @@ class LockFreeQueue {
 
   template <typename T2>
   void Push_DR(const T2 &element);
-  void Erase_DR(u64 no_bytes, u64 read_txn, QueueBlock *new_r_block);
+  void Erase_DR(u64 no_bytes, u64 read_txn, u64 read_txn_b, QueueBlock *new_r_block);
   auto LoopElements_DR(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
-    -> std::tuple<u64, u64, QueueBlock *, u64>;
+    -> std::tuple<u64, u64, u64, QueueBlock *>;
   auto Batch_Loop(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
-    -> std::tuple<u64, u64, QueueBlock *, u64>;
+    -> std::tuple<u64, u64, u64, QueueBlock *, u64>;
 };
 
 template <class T>

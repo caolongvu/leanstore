@@ -108,22 +108,16 @@ void LockFreeQueue<T>::Push_DR(const T2 &element) {
   obj->Construct(element);
   w_block->tail.store(w_tail + item_size, std::memory_order_release);
   w_block->no_txn.fetch_add(1, std::memory_order_release);
+  if (element.state == transaction::Transaction::State::BARRIER) {
+    w_block->no_txn_b.fetch_add(1, std::memory_order_release);
+  }
 
-  if (element.needs_remote_flush) {
-    auto w_pos = statistics::stats_w_pos[LeanStore::worker_thread_id].load(std::memory_order_acquire);
-    auto idx   = w_pos & statistics::STATS_MASK;
-    if (w_pos >
-        statistics::stats_r_pos[LeanStore::worker_thread_id].load(std::memory_order_acquire) + statistics::STATS_SIZE) {
-      std::cout << "w_pos = " << w_pos << " stats_r_pos = "
-                << statistics::stats_r_pos[LeanStore::worker_thread_id].load(std::memory_order_acquire) << std::endl;
+  if (element.state != transaction::Transaction::State::BARRIER) {
+    if (element.needs_remote_flush) {
+      statistics::txn_stats[LeanStore::worker_thread_id].emplace_back(element.stats);
+    } else {
+      statistics::txn_stats_rfa[LeanStore::worker_thread_id].emplace_back(element.stats);
     }
-    statistics::precommited_txn_queued[LeanStore::worker_thread_id][idx] = {element.stats, element.state};
-    statistics::stats_w_pos[LeanStore::worker_thread_id].fetch_add(1, std::memory_order_release);
-  } else {
-    auto w_pos = statistics::stats_w_pos_rfa[LeanStore::worker_thread_id].load(std::memory_order_acquire);
-    auto idx   = w_pos & statistics::STATS_MASK;
-    statistics::precommited_txn_queued_rfa[LeanStore::worker_thread_id][idx] = {element.stats, element.state};
-    statistics::stats_w_pos_rfa[LeanStore::worker_thread_id].fetch_add(1, std::memory_order_release);
   }
 
   auto commit_stats = tsctime::ReadTSC();
@@ -151,12 +145,13 @@ void LockFreeQueue<T>::Push_DR(const T2 &element) {
 }
 
 template <typename T>
-void LockFreeQueue<T>::Erase_DR(u64 no_bytes, u64 read_txn, QueueBlock *new_r_block) {
+void LockFreeQueue<T>::Erase_DR(u64 no_bytes, u64 read_txn, u64 read_txn_b, QueueBlock *new_r_block) {
   auto r_block = current_read_block_.load(std::memory_order_acquire);
   auto r_head  = r_block->head.load(std::memory_order_acquire);
 
   while (r_block != new_r_block) {
     r_block->no_txn.store(0, std::memory_order_release);
+    r_block->no_txn_b.store(0, std::memory_order_release);
     r_block->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
     r_block->head.store(0, std::memory_order_release);
     r_block->tail.store(0, std::memory_order_release);
@@ -199,6 +194,7 @@ void LockFreeQueue<T>::Erase_DR(u64 no_bytes, u64 read_txn, QueueBlock *new_r_bl
     r_head = no_bytes - (r_block->buffer_capacity - r_head);
   }
   r_block->no_txn.fetch_add(-read_txn, std::memory_order_release);
+  r_block->no_txn_b.fetch_add(-read_txn_b, std::memory_order_release);
   current_read_block_.store(r_block, std::memory_order_release);
   r_block->head.store(r_head, std::memory_order_release);
   r_block->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
@@ -206,12 +202,12 @@ void LockFreeQueue<T>::Erase_DR(u64 no_bytes, u64 read_txn, QueueBlock *new_r_bl
 
 template <typename T>
 auto LockFreeQueue<T>::LoopElements_DR(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
-  -> std::tuple<u64, u64, QueueBlock *, u64> {
+  -> std::tuple<u64, u64, u64, QueueBlock *> {
   auto r_block         = current_read_block_.load(std::memory_order_acquire);
   auto r_head          = r_block->head.load(std::memory_order_acquire);
   u64 no_bytes         = 0;
   u64 read_txn         = 0;
-  u64 committed_txn_wb = 0;
+  u64 read_txn_b       = 0;
 
   while (!(r_block == tail_block && r_head == until_tail)) {
     if (T::InvalidByteBuffer(&r_block->buffer[r_head])) {
@@ -220,34 +216,37 @@ auto LockFreeQueue<T>::LoopElements_DR(u64 until_tail, QueueBlock *tail_block, c
     }
     if (T::JumpByteBuffer(&r_block->buffer[r_head])) {
       r_block->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
-      r_block  = r_block->next.load(std::memory_order_acquire);
-      r_head   = r_block->head.load(std::memory_order_acquire);
-      no_bytes = 0;
-      read_txn = 0;
+      r_block    = r_block->next.load(std::memory_order_acquire);
+      r_head     = r_block->head.load(std::memory_order_acquire);
+      no_bytes   = 0;
+      read_txn   = 0;
+      read_txn_b = 0;
       continue;
     }
     const auto item = reinterpret_cast<T *>(&r_block->buffer[r_head]);
 
     if (!read_cb(*item)) { break; }
-    committed_txn_wb++;
     no_bytes += item->MemorySize();
     read_txn++;
+    if (item->state == transaction::Transaction::State::BARRIER) { read_txn_b++; }
     r_head += item->MemorySize();
   }
 
   r_block->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
 
-  return std::make_tuple(no_bytes, read_txn, r_block, committed_txn_wb);
+  return std::make_tuple(no_bytes, read_txn, read_txn_b, r_block);
 }
 
 template <typename T>
 auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
-  -> std::tuple<u64, u64, QueueBlock *, u64> {
+  -> std::tuple<u64, u64, u64, QueueBlock *, u64> {
   auto r_block         = current_read_block_.load(std::memory_order_acquire);
   auto r_head          = r_block->head.load(std::memory_order_acquire);
   u64 no_bytes         = 0;
   u64 read_txn         = 0;
+  u64 read_txn_b       = 0;
   u64 committed_txn_wb = 0;
+  u64 committed_txn_b  = 0;
 
   if (r_block != tail_block) {
     while (true) {
@@ -280,6 +279,7 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
     auto current = current_read_block_.load(std::memory_order_acquire);
     while (current != r_block) {
       committed_txn_wb += current->no_txn.load(std::memory_order_acquire);
+      committed_txn_b += current->no_txn_b.load(std::memory_order_acquire);
       current = current->next.load(std::memory_order_acquire);
     }
   }
@@ -291,10 +291,11 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
     }
     if (T::JumpByteBuffer(&r_block->buffer[r_head])) {
       r_block->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
-      r_block  = r_block->next.load(std::memory_order_acquire);
-      r_head   = r_block->head.load(std::memory_order_acquire);
-      no_bytes = 0;
-      read_txn = 0;
+      r_block    = r_block->next.load(std::memory_order_acquire);
+      r_head     = r_block->head.load(std::memory_order_acquire);
+      no_bytes   = 0;
+      read_txn   = 0;
+      read_txn_b = 0;
       continue;
     }
     const auto item = reinterpret_cast<T *>(&r_block->buffer[r_head]);
@@ -303,12 +304,16 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
     committed_txn_wb++;
     no_bytes += item->MemorySize();
     read_txn++;
+    if (item->state == transaction::Transaction::State::BARRIER) {
+      read_txn_b++;
+      committed_txn_b++;
+    }
     r_head += item->MemorySize();
   }
 
   r_block->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
 
-  return std::make_tuple(no_bytes, read_txn, r_block, committed_txn_wb);
+  return std::make_tuple(no_bytes, read_txn, read_txn_b, r_block, committed_txn_wb - committed_txn_b);
 }
 
 /**
