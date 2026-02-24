@@ -87,7 +87,7 @@ class LockFreeQueue {
     std::atomic<QueueBlock *> prev{nullptr};
     std::atomic<QueueBlock *> next{nullptr};
 
-    QueueBlock() : buffer_capacity(FLAGS_txn_queue_size_mb) {
+    QueueBlock() : buffer_capacity(FLAGS_txn_queue_size_mb * MB) {
       buffer = reinterpret_cast<u8 *>(AllocHuge(buffer_capacity));
     }
 

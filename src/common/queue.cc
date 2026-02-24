@@ -16,7 +16,7 @@ namespace leanstore {
 // ----------------------------------------------------------------------------------------------
 
 template <typename T>
-LockFreeQueue<T>::LockFreeQueue() : buffer_capacity_(FLAGS_txn_queue_size_mb) {
+LockFreeQueue<T>::LockFreeQueue() : buffer_capacity_(FLAGS_txn_queue_size_mb * MB) {
   assert(std::is_trivially_destructible_v<T>);
   if (FLAGS_dynamic_resizing) {
     first_block_.store(new QueueBlock(), std::memory_order_release);
@@ -112,9 +112,11 @@ void LockFreeQueue<T>::Push_DR(const T2 &element) {
   if (element.needs_remote_flush) {
     auto w_pos = statistics::stats_w_pos[LeanStore::worker_thread_id].load(std::memory_order_acquire);
     auto idx   = w_pos & statistics::STATS_MASK;
-    /*if (w_pos > statistics::stats_r_pos[LeanStore::worker_thread_id].load(std::memory_order_acquire) + statistics::STATS_SIZE) {
-      std::cout << "Around" << std::endl;
-    }*/
+    if (w_pos >
+        statistics::stats_r_pos[LeanStore::worker_thread_id].load(std::memory_order_acquire) + statistics::STATS_SIZE) {
+      std::cout << "w_pos = " << w_pos << " stats_r_pos = "
+                << statistics::stats_r_pos[LeanStore::worker_thread_id].load(std::memory_order_acquire) << std::endl;
+    }
     statistics::precommited_txn_queued[LeanStore::worker_thread_id][idx] = {element.stats, element.state};
     statistics::stats_w_pos[LeanStore::worker_thread_id].fetch_add(1, std::memory_order_release);
   } else {
@@ -248,7 +250,6 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
   u64 committed_txn_wb = 0;
 
   if (r_block != tail_block) {
-    
     while (true) {
       if (T::InvalidByteBuffer(&r_block->buffer[r_head])) { r_head = 0; }
       if (T::JumpByteBuffer(&r_block->buffer[r_head])) {

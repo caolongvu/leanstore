@@ -219,6 +219,7 @@ void GroupCommitExecutor::PhaseThree() {
               stat_txn.state = transaction::Transaction::State::COMMITTED;
               if (FLAGS_txn_debug) {
                 if (start_profiling_latency) {
+                  
                   if (stat_txn.stats.precommit == 0) { std::cout << "Normal precommit" << std::endl; }
                   statistics::txn_queue[LeanStore::worker_thread_id].emplace_back(
                     tsctime::TscDifferenceNs(stat_txn.stats.precommit, phase_2_begin_));
