@@ -69,7 +69,7 @@ class LockFreeQueue {
 
     total_ns =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - start).count();
-    // if (yield_ns > 0) { std::printf("Total: %lu ns | Yield: %lu ns\n", total_ns, yield_ns); }
+    if (yield_ns > 0) { std::printf("Total: %lu ns | Yield: %lu ns\n", total_ns, yield_ns); }
   }
 
  private:
@@ -122,7 +122,9 @@ class LockFreeQueue {
  public:
   constexpr auto CurrentTail() -> u64 { return tail_.load(std::memory_order_acquire); }
 
-  constexpr auto CurrentTail_DR() -> u64 { return current_write_block_.load(std::memory_order_acquire)->tail.load(std::memory_order_acquire); }
+  constexpr auto CurrentTail_DR() -> u64 {
+    return current_write_block_.load(std::memory_order_acquire)->tail.load(std::memory_order_acquire);
+  }
 
   auto CurrentWriteBlock_DR() -> QueueBlock * { return current_write_block_.load(std::memory_order_acquire); }
 

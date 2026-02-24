@@ -112,15 +112,16 @@ void LockFreeQueue<T>::Push_DR(const T2 &element) {
   if (element.needs_remote_flush) {
     auto w_pos = statistics::stats_w_pos[LeanStore::worker_thread_id].load(std::memory_order_acquire);
     auto idx   = w_pos & statistics::STATS_MASK;
-
+    /*if (w_pos > statistics::stats_r_pos[LeanStore::worker_thread_id].load(std::memory_order_acquire) + statistics::STATS_SIZE) {
+      std::cout << "Around" << std::endl;
+    }*/
     statistics::precommited_txn_queued[LeanStore::worker_thread_id][idx] = {element.stats, element.state};
-
-    statistics::stats_w_pos[LeanStore::worker_thread_id].store(w_pos + 1, std::memory_order_release);
+    statistics::stats_w_pos[LeanStore::worker_thread_id].fetch_add(1, std::memory_order_release);
   } else {
     auto w_pos = statistics::stats_w_pos_rfa[LeanStore::worker_thread_id].load(std::memory_order_acquire);
     auto idx   = w_pos & statistics::STATS_MASK;
     statistics::precommited_txn_queued_rfa[LeanStore::worker_thread_id][idx] = {element.stats, element.state};
-    statistics::stats_w_pos_rfa[LeanStore::worker_thread_id].store(w_pos + 1, std::memory_order_release);
+    statistics::stats_w_pos_rfa[LeanStore::worker_thread_id].fetch_add(1, std::memory_order_release);
   }
 
   auto commit_stats = tsctime::ReadTSC();
@@ -157,25 +158,36 @@ void LockFreeQueue<T>::Erase_DR(u64 no_bytes, u64 read_txn, QueueBlock *new_r_bl
     r_block->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
     r_block->head.store(0, std::memory_order_release);
     r_block->tail.store(0, std::memory_order_release);
+
+    auto current = new_r_block;
+    while (current->next.load(std::memory_order_acquire) != nullptr) {
+      current = current->next.load(std::memory_order_acquire);
+    }
+
+    QueueBlock *expected = nullptr;
+
+    while (!current->next.compare_exchange_strong(expected, r_block)) {
+      current  = expected;
+      expected = nullptr;
+    }
+
     if (first_block_.load(std::memory_order_acquire) == r_block) {
       first_block_.store(r_block->next.load(std::memory_order_acquire), std::memory_order_release);
     }
+
     if (r_block->prev.load(std::memory_order_acquire) != nullptr) {
       r_block->prev.load(std::memory_order_acquire)
         ->next.store(r_block->next.load(std::memory_order_acquire), std::memory_order_release);
     }
+
     if (r_block->next.load(std::memory_order_acquire) != nullptr) {
       r_block->next.load(std::memory_order_acquire)
         ->prev.store(r_block->prev.load(std::memory_order_acquire), std::memory_order_release);
     }
-    auto current = first_block_.load(std::memory_order_acquire);
-    while (current->next.load(std::memory_order_acquire) != nullptr) {
-      current = current->next.load(std::memory_order_acquire);
-    }
-    current->next.store(r_block, std::memory_order_release);
+
+    r_block->prev.store(current, std::memory_order_release);
     r_block = r_block->next.load(std::memory_order_acquire);
     r_head  = r_block->head.load(std::memory_order_acquire);
-    current->next.load(std::memory_order_acquire)->prev.store(current, std::memory_order_release);
     current->next.load(std::memory_order_acquire)->next.store(nullptr, std::memory_order_release);
   }
 
@@ -235,37 +247,40 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
   u64 read_txn         = 0;
   u64 committed_txn_wb = 0;
 
-  while (true) {
-    if (T::InvalidByteBuffer(&r_block->buffer[r_head])) { r_head = 0; }
-    if (T::JumpByteBuffer(&r_block->buffer[r_head])) {
-      if (r_block == tail_block || r_block->next.load(std::memory_order_acquire) == nullptr) {
+  if (r_block != tail_block) {
+    
+    while (true) {
+      if (T::InvalidByteBuffer(&r_block->buffer[r_head])) { r_head = 0; }
+      if (T::JumpByteBuffer(&r_block->buffer[r_head])) {
+        if (r_block == tail_block || r_block->next.load(std::memory_order_acquire) == nullptr) {
+          if (r_block->prev.load(std::memory_order_acquire) != nullptr) {
+            r_block = r_block->prev.load(std::memory_order_acquire);
+            r_head  = r_block->head.load(std::memory_order_acquire);
+          }
+          break;
+        }
+        r_block = r_block->next.load(std::memory_order_acquire);
+        r_head  = r_block->head.load(std::memory_order_acquire);
+        continue;
+      }
+      const auto item = reinterpret_cast<T *>(&r_block->buffer[r_head]);
+      if (!read_cb(*item)) {
         if (r_block->prev.load(std::memory_order_acquire) != nullptr) {
           r_block = r_block->prev.load(std::memory_order_acquire);
           r_head  = r_block->head.load(std::memory_order_acquire);
         }
         break;
       }
+      if (r_block == tail_block || r_block->next.load(std::memory_order_acquire) == nullptr) { break; }
       r_block = r_block->next.load(std::memory_order_acquire);
       r_head  = r_block->head.load(std::memory_order_acquire);
-      continue;
     }
-    const auto item = reinterpret_cast<T *>(&r_block->buffer[r_head]);
-    if (!read_cb(*item)) {
-      if (r_block->prev.load(std::memory_order_acquire) != nullptr) {
-        r_block = r_block->prev.load(std::memory_order_acquire);
-        r_head  = r_block->head.load(std::memory_order_acquire);
-      }
-      break;
-    }
-    if (r_block == tail_block || r_block->next.load(std::memory_order_acquire) == nullptr) { break; }
-    r_block = r_block->next.load(std::memory_order_acquire);
-    r_head  = r_block->head.load(std::memory_order_acquire);
-  }
 
-  auto current = current_read_block_.load(std::memory_order_acquire);
-  while (current != r_block) {
-    committed_txn_wb += current->no_txn.load(std::memory_order_acquire);
-    current = current->next.load(std::memory_order_acquire);
+    auto current = current_read_block_.load(std::memory_order_acquire);
+    while (current != r_block) {
+      committed_txn_wb += current->no_txn.load(std::memory_order_acquire);
+      current = current->next.load(std::memory_order_acquire);
+    }
   }
 
   while (!(r_block == tail_block && r_head == until_tail)) {
@@ -274,6 +289,7 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
       r_head = 0;
     }
     if (T::JumpByteBuffer(&r_block->buffer[r_head])) {
+      r_block->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
       r_block  = r_block->next.load(std::memory_order_acquire);
       r_head   = r_block->head.load(std::memory_order_acquire);
       no_bytes = 0;
@@ -281,13 +297,15 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
       continue;
     }
     const auto item = reinterpret_cast<T *>(&r_block->buffer[r_head]);
-    if (!read_cb(*item)) { break; }
 
+    if (!read_cb(*item)) { break; }
+    committed_txn_wb++;
     no_bytes += item->MemorySize();
     read_txn++;
-    committed_txn_wb++;
     r_head += item->MemorySize();
   }
+
+  r_block->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
 
   return std::make_tuple(no_bytes, read_txn, r_block, committed_txn_wb);
 }

@@ -9,7 +9,7 @@
 
 namespace leanstore::statistics {
 
-static constexpr u64 STATS_SIZE = 1 << 15;
+static constexpr u64 STATS_SIZE = 1 << 16;
 static constexpr u64 STATS_MASK = STATS_SIZE - 1;
 
 struct batch_looping_statistics {

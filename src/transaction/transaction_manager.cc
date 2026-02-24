@@ -156,7 +156,6 @@ void TransactionManager::DurableCommit(T &txn, timestamp_t queue_phase_start) {
   if (FLAGS_txn_debug) {
     auto commit_stats = tsctime::ReadTSC();
     if (start_profiling_latency) {
-      Ensure(txn.stats.arrival_time > 0);
       statistics::txn_queue[LeanStore::worker_thread_id].emplace_back(
         tsctime::TscDifferenceNs(txn.stats.precommit, queue_phase_start));
       if (txn.needs_remote_flush) {
