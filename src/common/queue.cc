@@ -149,14 +149,17 @@ void LockFreeQueue<T>::Erase_DR(u64 no_bytes, u64 read_txn, u64 read_txn_b, Queu
   auto r_block = current_read_block_.load(std::memory_order_acquire);
   auto r_head  = r_block->head.load(std::memory_order_acquire);
 
-  while (r_block != new_r_block) {
-    r_block->no_txn.store(0, std::memory_order_release);
-    r_block->no_txn_b.store(0, std::memory_order_release);
-    r_block->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
-    r_block->head.store(0, std::memory_order_release);
-    r_block->tail.store(0, std::memory_order_release);
+  if (r_block != new_r_block) {
+    auto current = r_block;
+    while (current != new_r_block) {
+      current->no_txn.store(0, std::memory_order_release);
+      current->no_txn_b.store(0, std::memory_order_release);
+      current->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
+      current->head.store(0, std::memory_order_release);
+      current->tail.store(0, std::memory_order_release);
+      current = current->next.load(std::memory_order_acquire);
+    }
 
-    auto current = new_r_block;
     while (current->next.load(std::memory_order_acquire) != nullptr) {
       current = current->next.load(std::memory_order_acquire);
     }
@@ -169,23 +172,19 @@ void LockFreeQueue<T>::Erase_DR(u64 no_bytes, u64 read_txn, u64 read_txn_b, Queu
     }
 
     if (first_block_.load(std::memory_order_acquire) == r_block) {
-      first_block_.store(r_block->next.load(std::memory_order_acquire), std::memory_order_release);
+      first_block_.store(new_r_block, std::memory_order_release);
     }
 
     if (r_block->prev.load(std::memory_order_acquire) != nullptr) {
-      r_block->prev.load(std::memory_order_acquire)
-        ->next.store(r_block->next.load(std::memory_order_acquire), std::memory_order_release);
+      r_block->prev.load(std::memory_order_acquire)->next.store(new_r_block, std::memory_order_release);
     }
 
-    if (r_block->next.load(std::memory_order_acquire) != nullptr) {
-      r_block->next.load(std::memory_order_acquire)
-        ->prev.store(r_block->prev.load(std::memory_order_acquire), std::memory_order_release);
-    }
+    new_r_block->prev.load(std::memory_order_acquire)->next.store(nullptr, std::memory_order_release);
+    new_r_block->prev.store(r_block->prev.load(std::memory_order_acquire), std::memory_order_release);
 
     r_block->prev.store(current, std::memory_order_release);
-    r_block = r_block->next.load(std::memory_order_acquire);
+    r_block = new_r_block;
     r_head  = r_block->head.load(std::memory_order_acquire);
-    current->next.load(std::memory_order_acquire)->next.store(nullptr, std::memory_order_release);
   }
 
   if (r_head + no_bytes < r_block->buffer_capacity) {
@@ -203,11 +202,11 @@ void LockFreeQueue<T>::Erase_DR(u64 no_bytes, u64 read_txn, u64 read_txn_b, Queu
 template <typename T>
 auto LockFreeQueue<T>::LoopElements_DR(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
   -> std::tuple<u64, u64, u64, QueueBlock *> {
-  auto r_block         = current_read_block_.load(std::memory_order_acquire);
-  auto r_head          = r_block->head.load(std::memory_order_acquire);
-  u64 no_bytes         = 0;
-  u64 read_txn         = 0;
-  u64 read_txn_b       = 0;
+  auto r_block   = current_read_block_.load(std::memory_order_acquire);
+  auto r_head    = r_block->head.load(std::memory_order_acquire);
+  u64 no_bytes   = 0;
+  u64 read_txn   = 0;
+  u64 read_txn_b = 0;
 
   while (!(r_block == tail_block && r_head == until_tail)) {
     if (T::InvalidByteBuffer(&r_block->buffer[r_head])) {
