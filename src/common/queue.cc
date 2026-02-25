@@ -16,7 +16,7 @@ namespace leanstore {
 // ----------------------------------------------------------------------------------------------
 
 template <typename T>
-LockFreeQueue<T>::LockFreeQueue() : buffer_capacity_(FLAGS_txn_queue_size_mb * MB) {
+LockFreeQueue<T>::LockFreeQueue() : buffer_capacity_(FLAGS_txn_queue_size_mb * KB) {
   assert(std::is_trivially_destructible_v<T>);
   if (FLAGS_dynamic_resizing) {
     first_block_.store(new QueueBlock(), std::memory_order_release);
@@ -87,7 +87,6 @@ void LockFreeQueue<T>::Push_DR(const T2 &element) {
   auto r_head_w_block = w_block->head.load(std::memory_order_acquire);
   if (NoSpace(r_head_w_block, w_tail, (item_size + sizeof(T::JUMP_ITEM)),
               w_block->no_txn.load(std::memory_order_acquire))) {
-    std::memcpy(&w_block->buffer[w_tail], &(T::JUMP_ITEM), sizeof(T::JUMP_ITEM));
     if (w_block->next.load(std::memory_order_acquire) == nullptr) {
       QueueBlock *new_block = new QueueBlock();
       QueueBlock *expected  = nullptr;
@@ -98,6 +97,7 @@ void LockFreeQueue<T>::Push_DR(const T2 &element) {
       }
     }
     current_write_block_.store(w_block->next.load(std::memory_order_acquire), std::memory_order_release);
+    std::memcpy(&w_block->buffer[w_tail], &(T::JUMP_ITEM), sizeof(T::JUMP_ITEM));
     w_block = current_write_block_.load(std::memory_order_acquire);
     w_tail  = w_block->tail.load(std::memory_order_acquire);
   }
@@ -201,12 +201,13 @@ void LockFreeQueue<T>::Erase_DR(u64 no_bytes, u64 read_txn, u64 read_txn_b, Queu
 
 template <typename T>
 auto LockFreeQueue<T>::LoopElements_DR(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
-  -> std::tuple<u64, u64, u64, QueueBlock *> {
-  auto r_block   = current_read_block_.load(std::memory_order_acquire);
-  auto r_head    = r_block->head.load(std::memory_order_acquire);
-  u64 no_bytes   = 0;
-  u64 read_txn   = 0;
-  u64 read_txn_b = 0;
+  -> std::tuple<u64, u64, u64, QueueBlock *, u64> {
+  auto r_block      = current_read_block_.load(std::memory_order_acquire);
+  auto r_head       = r_block->head.load(std::memory_order_acquire);
+  u64 no_bytes      = 0;
+  u64 read_txn      = 0;
+  u64 read_txn_b    = 0;
+  u64 committed_txn = 0;
 
   while (!(r_block == tail_block && r_head == until_tail)) {
     if (T::InvalidByteBuffer(&r_block->buffer[r_head])) {
@@ -227,19 +228,21 @@ auto LockFreeQueue<T>::LoopElements_DR(u64 until_tail, QueueBlock *tail_block, c
     if (!read_cb(*item)) { break; }
     no_bytes += item->MemorySize();
     read_txn++;
+    if (item->state != transaction::Transaction::State::BARRIER) { committed_txn++; }
     if (item->state == transaction::Transaction::State::BARRIER) { read_txn_b++; }
     r_head += item->MemorySize();
   }
 
   r_block->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
 
-  return std::make_tuple(no_bytes, read_txn, read_txn_b, r_block);
+  return std::make_tuple(no_bytes, read_txn, read_txn_b, r_block, committed_txn);
 }
 
 template <typename T>
 auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
   -> std::tuple<u64, u64, u64, QueueBlock *, u64> {
   auto r_block         = current_read_block_.load(std::memory_order_acquire);
+  auto current         = r_block;
   auto r_head          = r_block->head.load(std::memory_order_acquire);
   u64 no_bytes         = 0;
   u64 read_txn         = 0;
@@ -275,12 +278,14 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
       r_head  = r_block->head.load(std::memory_order_acquire);
     }
 
-    auto current = current_read_block_.load(std::memory_order_acquire);
+    auto blocks_looped = 0;
     while (current != r_block) {
       committed_txn_wb += current->no_txn.load(std::memory_order_acquire);
       committed_txn_b += current->no_txn_b.load(std::memory_order_acquire);
+      blocks_looped++;
       current = current->next.load(std::memory_order_acquire);
     }
+    // if (blocks_looped > 0) { std::cout << "Txn looped = " << committed_txn_wb << std::endl; }
   }
 
   while (!(r_block == tail_block && r_head == until_tail)) {

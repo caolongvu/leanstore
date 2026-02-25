@@ -30,7 +30,9 @@ GroupCommitExecutor::GroupCommitExecutor(buffer::BufferManager *buffer, LogManag
       start_logger_id_(start_wid),
       end_logger_id_(end_wid),
       ready_to_commit_cut_(FLAGS_worker_count),
+      ready_to_commit_block_(FLAGS_worker_count),
       ready_to_commit_rfa_cut_(FLAGS_worker_count),
+      ready_to_commit_rfa_block_(FLAGS_worker_count),
       worker_states_(FLAGS_worker_count) {
   int ret = io_uring_queue_init(GROUP_COMMIT_QD, &ring_, 0);
   if (ret != 0) { throw std::runtime_error("GroupCommit: io_uring_queue_init error"); }
@@ -154,16 +156,15 @@ void GroupCommitExecutor::PhaseTwo() {
      * @brief Persist all BLOBs for all transactions
      */
     if (FLAGS_dynamic_resizing) {
-      logger.precommitted_queue.LoopElements_DR(ready_to_commit_cut_[w_i],
-                                                logger.precommitted_queue.CurrentWriteBlock_DR(), [&](auto &txn) {
-                                                  PrepareLargePageWrite(txn);
-                                                  return true;
-                                                });
-      logger.precommitted_queue_rfa.LoopElements_DR(
-        ready_to_commit_rfa_cut_[w_i], logger.precommitted_queue_rfa.CurrentWriteBlock_DR(), [&](auto &txn) {
-          PrepareLargePageWrite(txn);
-          return true;
-        });
+      logger.precommitted_queue.LoopElements_DR(ready_to_commit_cut_[w_i], ready_to_commit_block_[w_i], [&](auto &txn) {
+        PrepareLargePageWrite(txn);
+        return true;
+      });
+      logger.precommitted_queue_rfa.LoopElements_DR(ready_to_commit_rfa_cut_[w_i], ready_to_commit_rfa_block_[w_i],
+                                                    [&](auto &txn) {
+                                                      PrepareLargePageWrite(txn);
+                                                      return true;
+                                                    });
     } else {
       logger.precommitted_queue.LoopElements(ready_to_commit_cut_[w_i], [&](auto &txn) {
         PrepareLargePageWrite(txn);
@@ -199,9 +200,9 @@ void GroupCommitExecutor::PhaseThree() {
     auto committed_txn = 0UL;
     if (FLAGS_dynamic_resizing) {
       if (FLAGS_batch_looping) {
-        auto [loop_bytes, read_txn, read_txn_b, new_r_block, committed_txn] = logger.precommitted_queue.Batch_Loop(
-          ready_to_commit_cut_[w_i], logger.precommitted_queue.CurrentWriteBlock_DR(),
-          [&](auto &txn) { return SatisfyCommitConditions(w_i, txn); });
+        auto [loop_bytes, read_txn, read_txn_b, new_r_block, committed_txn] =
+          logger.precommitted_queue.Batch_Loop(ready_to_commit_cut_[w_i], ready_to_commit_block_[w_i],
+                                               [&](auto &txn) { return SatisfyCommitConditions(w_i, txn); });
 
         if (!(loop_bytes == 0 && read_txn == 0 && new_r_block == logger.precommitted_queue.CurrentReadBlock_DR() &&
               committed_txn == 0)) {
@@ -216,7 +217,7 @@ void GroupCommitExecutor::PhaseThree() {
 
         std::tie(loop_bytes, read_txn, read_txn_b, new_r_block, committed_txn) =
           logger.precommitted_queue_rfa.Batch_Loop(
-            ready_to_commit_rfa_cut_[w_i], logger.precommitted_queue_rfa.CurrentWriteBlock_DR(),
+            ready_to_commit_rfa_cut_[w_i], ready_to_commit_rfa_block_[w_i],
             [&](auto &txn) { return txn.commit_ts <= worker_states_[w_i].precommitted_tx_commit_ts; });
         if (!(loop_bytes == 0 && read_txn == 0 && new_r_block == logger.precommitted_queue_rfa.CurrentReadBlock_DR() &&
               committed_txn == 0)) {
@@ -226,8 +227,8 @@ void GroupCommitExecutor::PhaseThree() {
           statistics::txn_stats_rfa_committed[w_i].emplace_back(committed_txn, commit_stats, phase_2_begin_);
         }
       } else {
-        auto [loop_bytes, read_txn, read_txn_b, new_r_block] = logger.precommitted_queue.LoopElements_DR(
-          ready_to_commit_cut_[w_i], logger.precommitted_queue.CurrentWriteBlock_DR(), [&](auto &txn) {
+        auto [loop_bytes, read_txn, read_txn_b, new_r_block, committed_txn_nu] = logger.precommitted_queue.LoopElements_DR(
+          ready_to_commit_cut_[w_i], ready_to_commit_block_[w_i], [&](auto &txn) {
             if (SatisfyCommitConditions(w_i, txn)) {
               if (txn.state != transaction::Transaction::State::BARRIER) {
                 committed_txn++;
@@ -245,8 +246,8 @@ void GroupCommitExecutor::PhaseThree() {
 
         /* Process RFA-transaction queue */
         committed_txn                                           = 0;
-        std::tie(loop_bytes, read_txn, read_txn_b, new_r_block) = logger.precommitted_queue_rfa.LoopElements_DR(
-          ready_to_commit_rfa_cut_[w_i], logger.precommitted_queue_rfa.CurrentWriteBlock_DR(), [&](auto &txn) {
+        std::tie(loop_bytes, read_txn, read_txn_b, new_r_block, committed_txn_nu) = logger.precommitted_queue_rfa.LoopElements_DR(
+          ready_to_commit_rfa_cut_[w_i], ready_to_commit_rfa_block_[w_i], [&](auto &txn) {
             if (txn.commit_ts <= worker_states_[w_i].precommitted_tx_commit_ts) [[likely]] {
               if (txn.state != transaction::Transaction::State::BARRIER) {
                 committed_txn++;
@@ -317,8 +318,11 @@ void GroupCommitExecutor::CollectConsistentState(wid_t w_i) {
 void GroupCommitExecutor::CollectPrecommittedQueue(wid_t w_i) {
   auto &logger = log_manager_->logger_[w_i];
   if (FLAGS_dynamic_resizing) {
-    ready_to_commit_cut_[w_i]     = logger.precommitted_queue.CurrentTail_DR();
-    ready_to_commit_rfa_cut_[w_i] = logger.precommitted_queue_rfa.CurrentTail_DR();
+    ready_to_commit_cut_[w_i]       = logger.precommitted_queue.CurrentTail_DR();
+    ready_to_commit_block_[w_i]     = logger.precommitted_queue.CurrentWriteBlock_DR();
+    ready_to_commit_rfa_cut_[w_i]   = logger.precommitted_queue_rfa.CurrentTail_DR();
+    ready_to_commit_rfa_block_[w_i] = logger.precommitted_queue_rfa.CurrentWriteBlock_DR();
+
   } else {
     ready_to_commit_cut_[w_i]     = logger.precommitted_queue.CurrentTail();
     ready_to_commit_rfa_cut_[w_i] = logger.precommitted_queue_rfa.CurrentTail();
@@ -366,6 +370,9 @@ void GroupCommitExecutor::PrepareLargePageWrite(const transaction::SerializableT
 }
 
 void GroupCommitExecutor::CompleteTransaction(transaction::SerializableTransaction &txn) {
+  if (txn.state != transaction::Transaction::State::READY_TO_COMMIT) {
+    std::cout << static_cast<int>(txn.state) << std::endl;
+  }
   Ensure(txn.state == transaction::Transaction::State::READY_TO_COMMIT);
   if (FLAGS_blob_enable) {
     for (auto &lp : txn.ToFlushedLargePages()) { completed_lp_.remove(lp.start_pid); }

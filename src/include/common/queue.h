@@ -72,14 +72,11 @@ class LockFreeQueue {
     if (yield_ns > 0) { std::printf("Total: %lu ns | Yield: %lu ns\n", total_ns, yield_ns); }
   }
 
- private:
-  FRIEND_TEST(TestQueue, BasicTest);
-  FRIEND_TEST(TestQueue, ConcurrencyTest);
-
+ public:
   struct QueueBlock {
     u8 *buffer;
     u64 buffer_capacity;
-    std::atomic<u64> no_txn = 0;
+    std::atomic<u64> no_txn   = 0;
     std::atomic<u64> no_txn_b = 0;
     std::atomic<uint64_t> last_used;
     std::atomic<u64> head = {0}; /* Read from head */
@@ -88,12 +85,16 @@ class LockFreeQueue {
     std::atomic<QueueBlock *> prev{nullptr};
     std::atomic<QueueBlock *> next{nullptr};
 
-    QueueBlock() : buffer_capacity(FLAGS_txn_queue_size_mb * MB) {
+    QueueBlock() : buffer_capacity(FLAGS_txn_queue_size_mb * KB) {
       buffer = reinterpret_cast<u8 *>(AllocHuge(buffer_capacity));
     }
 
     ~QueueBlock() { munmap(buffer, buffer_capacity); }
   };
+
+ private:
+  FRIEND_TEST(TestQueue, BasicTest);
+  FRIEND_TEST(TestQueue, ConcurrencyTest);
 
   u8 *buffer_;
   u64 buffer_capacity_;
@@ -139,7 +140,7 @@ class LockFreeQueue {
   void Push_DR(const T2 &element);
   void Erase_DR(u64 no_bytes, u64 read_txn, u64 read_txn_b, QueueBlock *new_r_block);
   auto LoopElements_DR(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
-    -> std::tuple<u64, u64, u64, QueueBlock *>;
+    -> std::tuple<u64, u64, u64, QueueBlock *, u64>;
   auto Batch_Loop(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
     -> std::tuple<u64, u64, u64, QueueBlock *, u64>;
 };

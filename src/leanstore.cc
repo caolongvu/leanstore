@@ -155,6 +155,17 @@ void LeanStore::Shutdown() {
 
       if (FLAGS_batch_looping) {
         for (auto idx = 0U; idx < wcnt; idx++) {
+          /*std::cout << "statistics::txn_stats[" << idx << "].size() = " << statistics::txn_stats[idx].size()
+                    << std::endl;
+          std::cout << "statistics::txn_stats_rfa[" << idx << "].size() = " << statistics::txn_stats_rfa[idx].size()
+                    << std::endl;
+
+          std::cout << "statistics::txn_latency[" << idx << "].size() = " << statistics::txn_latency[idx].size()
+                    << std::endl;
+
+           std::cout << "rfa_statistics::txn_latency[" << idx << "].size() = " << statistics::rfa_txn_latency[idx].size()
+                    << std::endl;*/
+
           auto offset = 0;
           for (const auto &stats_committed : statistics::txn_stats_committed[idx]) {
             for (auto i = offset; i < offset + stats_committed.committed_txn; i++) {
@@ -169,6 +180,9 @@ void LeanStore::Shutdown() {
             }
             offset += stats_committed.committed_txn;
           }
+          std::cout << "idx = " << idx << " statistics::txn_stats[" << idx
+                    << "].size() = " << statistics::txn_stats[idx].size() << " offset = " << offset
+                    << " diff = " << statistics::txn_stats[idx].size() - offset << std::endl;
           auto offset_rfa = 0;
           for (const auto &stats_committed_rfa : statistics::txn_stats_rfa_committed[idx]) {
             for (auto i = offset_rfa; i < offset_rfa + stats_committed_rfa.committed_txn; i++) {
@@ -183,6 +197,9 @@ void LeanStore::Shutdown() {
             }
             offset_rfa += stats_committed_rfa.committed_txn;
           }
+          /*std::cout << "idx = " << idx << " statistics::txn_stats_rfa[" << idx
+                    << "].size() = " << statistics::txn_stats_rfa[idx].size() << " offset_rfa = " << offset_rfa
+                    << " diff = " << statistics::txn_stats_rfa[idx].size() - offset_rfa << std::endl;*/
         }
       }
       for (auto idx = 1U; idx < wcnt; idx++) {

@@ -3,6 +3,7 @@
 #include "buffer/buffer_manager.h"
 #include "common/constants.h"
 #include "common/exceptions.h"
+#include "common/queue.h"
 #include "common/typedefs.h"
 #include "leanstore/config.h"
 #include "recovery/log_worker.h"
@@ -74,7 +75,9 @@ class GroupCommitExecutor {
   const u64 start_logger_id_;  // The worker id of the 1st worker
   const u64 end_logger_id_;    // The worker id of the last worker in the commit group
   std::vector<size_t> ready_to_commit_cut_;
+  std::vector<LockFreeQueue<leanstore::transaction::SerializableTransaction>::QueueBlock *> ready_to_commit_block_;
   std::vector<size_t> ready_to_commit_rfa_cut_;
+  std::vector<LockFreeQueue<leanstore::transaction::SerializableTransaction>::QueueBlock *> ready_to_commit_rfa_block_;
   std::vector<WorkerConsistentState> worker_states_;
 
   /* Extent management */
