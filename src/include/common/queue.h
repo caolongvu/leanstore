@@ -4,6 +4,8 @@
 #include "common/typedefs.h"
 #include "common/utils.h"
 #include "sync/hybrid_latch.h"
+#include "leanstore/statistics.h"
+
 
 #include "gtest/gtest_prod.h"
 
@@ -48,7 +50,7 @@ class LockFreeQueue {
     auto r_head = head_.load(std::memory_order_acquire);
     // std::cout << "Debug Push : NoSpace = " << NoSpace(r_head, w_tail, item_size) << std::endl;
 
-    while (NoSpace(r_head, w_tail, item_size, no_txn_.load(std::memory_order_acquire))) {
+    while (NoSpace(r_head, w_tail, item_size, no_txn_.load(std::memory_order_acquire)) && leanstore::statistics::is_running.load()) {
       /*std::cout << "r_head = " << r_head << " w_tail = " << w_tail << " item_size = " << item_size
               << " no_txn_ = " << no_txn_ << std::endl;
       break;*/
@@ -85,7 +87,7 @@ class LockFreeQueue {
     std::atomic<QueueBlock *> prev{nullptr};
     std::atomic<QueueBlock *> next{nullptr};
 
-    QueueBlock() : buffer_capacity(FLAGS_txn_queue_size_mb * KB) {
+    QueueBlock() : buffer_capacity(FLAGS_txn_queue_size_kb * KB) {
       buffer = reinterpret_cast<u8 *>(AllocHuge(buffer_capacity));
     }
 

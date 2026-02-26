@@ -16,7 +16,7 @@ namespace leanstore {
 // ----------------------------------------------------------------------------------------------
 
 template <typename T>
-LockFreeQueue<T>::LockFreeQueue() : buffer_capacity_(FLAGS_txn_queue_size_mb * KB) {
+LockFreeQueue<T>::LockFreeQueue() : buffer_capacity_(FLAGS_txn_queue_size_kb * KB) {
   assert(std::is_trivially_destructible_v<T>);
   if (FLAGS_dynamic_resizing) {
     first_block_.store(new QueueBlock(), std::memory_order_release);
@@ -110,14 +110,6 @@ void LockFreeQueue<T>::Push_DR(const T2 &element) {
   w_block->no_txn.fetch_add(1, std::memory_order_release);
   if (element.state == transaction::Transaction::State::BARRIER) {
     w_block->no_txn_b.fetch_add(1, std::memory_order_release);
-  }
-
-  if (element.state != transaction::Transaction::State::BARRIER) {
-    if (element.needs_remote_flush) {
-      statistics::txn_stats[LeanStore::worker_thread_id].emplace_back(element.stats);
-    } else {
-      statistics::txn_stats_rfa[LeanStore::worker_thread_id].emplace_back(element.stats);
-    }
   }
 
   auto commit_stats = tsctime::ReadTSC();
@@ -215,6 +207,7 @@ auto LockFreeQueue<T>::LoopElements_DR(u64 until_tail, QueueBlock *tail_block, c
       r_head = 0;
     }
     if (T::JumpByteBuffer(&r_block->buffer[r_head])) {
+      //std::cout << "Jump byte" << std::endl;
       r_block->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
       r_block    = r_block->next.load(std::memory_order_acquire);
       r_head     = r_block->head.load(std::memory_order_acquire);
@@ -285,7 +278,7 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
       blocks_looped++;
       current = current->next.load(std::memory_order_acquire);
     }
-    // if (blocks_looped > 0) { std::cout << "Txn looped = " << committed_txn_wb << std::endl; }
+    //if (blocks_looped > 0) { std::cout << "Txn looped = " << committed_txn_wb << std::endl; }
   }
 
   while (!(r_block == tail_block && r_head == until_tail)) {
@@ -294,6 +287,7 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
       r_head = 0;
     }
     if (T::JumpByteBuffer(&r_block->buffer[r_head])) {
+      //std::cout << "Jump byte" << std::endl;
       r_block->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
       r_block    = r_block->next.load(std::memory_order_acquire);
       r_head     = r_block->head.load(std::memory_order_acquire);

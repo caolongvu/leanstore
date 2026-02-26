@@ -34,6 +34,7 @@ extern std::vector<transaction::Transaction::Statistics> txn_stats[MAX_NUMBER_OF
 extern std::vector<txn_statistics_committed> txn_stats_committed[MAX_NUMBER_OF_WORKER];
 extern std::vector<transaction::Transaction::Statistics> txn_stats_rfa[MAX_NUMBER_OF_WORKER];
 extern std::vector<txn_statistics_committed> txn_stats_rfa_committed[MAX_NUMBER_OF_WORKER];
+extern std::atomic<bool> is_running;
 
 
 

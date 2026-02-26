@@ -227,72 +227,72 @@ void GroupCommitExecutor::PhaseThree() {
           statistics::txn_stats_rfa_committed[w_i].emplace_back(committed_txn, commit_stats, phase_2_begin_);
         }
       } else {
-        auto [loop_bytes, read_txn, read_txn_b, new_r_block, committed_txn_nu] = logger.precommitted_queue.LoopElements_DR(
-          ready_to_commit_cut_[w_i], ready_to_commit_block_[w_i], [&](auto &txn) {
-            if (SatisfyCommitConditions(w_i, txn)) {
-              if (txn.state != transaction::Transaction::State::BARRIER) {
-                committed_txn++;
-
-                CompleteTransaction(txn);
-              }
-              return true;
-            }
-            return false;
-          });
+        auto [loop_bytes, read_txn, read_txn_b, new_r_block, committed_txn_nu] =
+          logger.precommitted_queue.LoopElements_DR(ready_to_commit_cut_[w_i], ready_to_commit_block_[w_i],
+                                                    [&](auto &txn) {
+                                                      if (SatisfyCommitConditions(w_i, txn)) {
+                                                        if (txn.state != transaction::Transaction::State::BARRIER) {
+                                                          committed_txn++;
+                                                        }
+                                                        return true;
+                                                      }
+                                                      return false;
+                                                    });
         if (!(loop_bytes == 0 && read_txn == 0 && new_r_block == logger.precommitted_queue.CurrentReadBlock_DR())) {
           logger.precommitted_queue.Erase_DR(loop_bytes, read_txn, read_txn_b, new_r_block);
+          auto commit_stats = tsctime::ReadTSC();
+          statistics::txn_stats_committed[w_i].emplace_back(committed_txn, commit_stats, phase_2_begin_);
           completed_txn_ += committed_txn;
         }
 
         /* Process RFA-transaction queue */
-        committed_txn                                           = 0;
-        std::tie(loop_bytes, read_txn, read_txn_b, new_r_block, committed_txn_nu) = logger.precommitted_queue_rfa.LoopElements_DR(
-          ready_to_commit_rfa_cut_[w_i], ready_to_commit_rfa_block_[w_i], [&](auto &txn) {
-            if (txn.commit_ts <= worker_states_[w_i].precommitted_tx_commit_ts) [[likely]] {
-              if (txn.state != transaction::Transaction::State::BARRIER) {
-                committed_txn++;
-                CompleteTransaction(txn);
+        committed_txn = 0;
+        std::tie(loop_bytes, read_txn, read_txn_b, new_r_block, committed_txn_nu) =
+          logger.precommitted_queue_rfa.LoopElements_DR(
+            ready_to_commit_rfa_cut_[w_i], ready_to_commit_rfa_block_[w_i], [&](auto &txn) {
+              if (txn.commit_ts <= worker_states_[w_i].precommitted_tx_commit_ts) [[likely]] {
+                if (txn.state != transaction::Transaction::State::BARRIER) { committed_txn++; }
+                return true;
               }
-              return true;
-            }
-            return false;
-          });
+              return false;
+            });
         if (!(loop_bytes == 0 && read_txn == 0 && new_r_block == logger.precommitted_queue_rfa.CurrentReadBlock_DR())) {
           logger.precommitted_queue_rfa.Erase_DR(loop_bytes, read_txn, read_txn_b, new_r_block);
+          auto commit_stats = tsctime::ReadTSC();
+          statistics::txn_stats_rfa_committed[w_i].emplace_back(committed_txn, commit_stats, phase_2_begin_);
           completed_txn_ += committed_txn;
         }
       }
     } else {
       auto [loop_bytes, no_txn] = logger.precommitted_queue.LoopElements(ready_to_commit_cut_[w_i], [&](auto &txn) {
         if (SatisfyCommitConditions(w_i, txn)) {
-          if (txn.state != transaction::Transaction::State::BARRIER) {
-            committed_txn++;
-            CompleteTransaction(txn);
-          }
+          if (txn.state != transaction::Transaction::State::BARRIER) { committed_txn++; }
           return true;
         }
         return false;
       });
       if (loop_bytes > 0) {
         logger.precommitted_queue.Erase(loop_bytes, no_txn);
+        auto commit_stats = tsctime::ReadTSC();
+        statistics::txn_stats_committed[w_i].emplace_back(committed_txn, commit_stats, phase_2_begin_);
         completed_txn_ += committed_txn;
       }
+
 
       /* Process RFA-transaction queue */
       committed_txn = 0;
       std::tie(loop_bytes, no_txn) =
         logger.precommitted_queue_rfa.LoopElements(ready_to_commit_rfa_cut_[w_i], [&](auto &txn) {
           if (txn.commit_ts <= worker_states_[w_i].precommitted_tx_commit_ts) [[likely]] {
-            if (txn.state != transaction::Transaction::State::BARRIER) {
-              committed_txn++;
-              CompleteTransaction(txn);
-            }
+            if (txn.state != transaction::Transaction::State::BARRIER) { committed_txn++; }
             return true;
           }
           return false;
         });
       if (loop_bytes > 0) {
         logger.precommitted_queue_rfa.Erase(loop_bytes, no_txn);
+        auto commit_stats = tsctime::ReadTSC();
+        statistics::txn_stats_rfa_committed[w_i].emplace_back(committed_txn, commit_stats, phase_2_begin_);
         completed_txn_ += committed_txn;
       }
     }

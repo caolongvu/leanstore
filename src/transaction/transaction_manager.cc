@@ -209,6 +209,9 @@ void TransactionManager::QueueTransaction(Transaction &txn) {
     } else {
       logger.precommitted_queue.Push(txn);
     }
+    if (txn.state != transaction::Transaction::State::BARRIER) {
+      statistics::txn_stats[LeanStore::worker_thread_id].emplace_back(txn.stats);
+    }
     if (start_profiling && txn.state != Transaction::State::BARRIER) {
       statistics::precommited_txn_processed[LeanStore::worker_thread_id] += 1;
     }
@@ -217,6 +220,9 @@ void TransactionManager::QueueTransaction(Transaction &txn) {
       logger.precommitted_queue_rfa.Push_DR(txn);
     } else {
       logger.precommitted_queue_rfa.Push(txn);
+    }
+    if (txn.state != transaction::Transaction::State::BARRIER) {
+      statistics::txn_stats_rfa[LeanStore::worker_thread_id].emplace_back(txn.stats);
     }
     if (start_profiling && txn.state != Transaction::State::BARRIER) {
       statistics::precommited_rfa_txn_processed[LeanStore::worker_thread_id] += 1;

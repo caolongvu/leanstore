@@ -32,7 +32,7 @@ DECLARE_uint32(wal_recovery_threads);
 DECLARE_bool(txn_debug);
 DECLARE_int32(txn_commit_variant);
 DECLARE_uint32(txn_commit_group_size);
-DECLARE_uint32(txn_queue_size_mb);
+DECLARE_uint32(txn_queue_size_kb);
 DECLARE_bool(dynamic_resizing);
 DECLARE_bool(batch_looping);
 DECLARE_uint64(queueblock_removal_threshold);

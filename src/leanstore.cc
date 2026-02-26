@@ -139,6 +139,7 @@ LeanStore::~LeanStore() {
 }
 
 void LeanStore::Shutdown() {
+  statistics::is_running.store(false, std::memory_order_release);
   worker_pool.Stop();
   Ensure(is_running == false);
   if (group_committer.joinable()) { group_committer.join(); }
@@ -153,55 +154,49 @@ void LeanStore::Shutdown() {
         wcnt++;
       }
 
-      if (FLAGS_batch_looping) {
-        for (auto idx = 0U; idx < wcnt; idx++) {
-          /*std::cout << "statistics::txn_stats[" << idx << "].size() = " << statistics::txn_stats[idx].size()
-                    << std::endl;
-          std::cout << "statistics::txn_stats_rfa[" << idx << "].size() = " << statistics::txn_stats_rfa[idx].size()
-                    << std::endl;
-
-          std::cout << "statistics::txn_latency[" << idx << "].size() = " << statistics::txn_latency[idx].size()
-                    << std::endl;
-
-           std::cout << "rfa_statistics::txn_latency[" << idx << "].size() = " << statistics::rfa_txn_latency[idx].size()
-                    << std::endl;*/
-
-          auto offset = 0;
-          for (const auto &stats_committed : statistics::txn_stats_committed[idx]) {
-            for (auto i = offset; i < offset + stats_committed.committed_txn; i++) {
-              statistics::txn_queue[0].emplace_back(
-                tsctime::TscDifferenceNs(statistics::txn_stats[idx][i].precommit, stats_committed.phase_2_begin));
-              statistics::txn_latency[0].emplace_back(
-                tsctime::TscDifferenceNs(statistics::txn_stats[idx][i].start, stats_committed.commit_stats));
-              statistics::txn_exec[0].emplace_back(
-                tsctime::TscDifferenceNs(statistics::txn_stats[idx][i].start, statistics::txn_stats[idx][i].precommit));
-              statistics::lat_inc_wait[0].emplace_back(
-                tsctime::TscDifferenceNs(statistics::txn_stats[idx][i].arrival_time, stats_committed.commit_stats));
-            }
-            offset += stats_committed.committed_txn;
+      for (auto idx = 0U; idx < wcnt; idx++) {
+      
+        auto offset = 0;
+        for (const auto &stats_committed : statistics::txn_stats_committed[idx]) {
+          for (auto i = offset; i < offset + stats_committed.committed_txn; i++) {
+            statistics::txn_queue[0].emplace_back(
+              tsctime::TscDifferenceNs(statistics::txn_stats[idx][i].precommit, stats_committed.phase_2_begin));
+            statistics::txn_latency[0].emplace_back(
+              tsctime::TscDifferenceNs(statistics::txn_stats[idx][i].start, stats_committed.commit_stats));
+            statistics::txn_exec[0].emplace_back(
+              tsctime::TscDifferenceNs(statistics::txn_stats[idx][i].start, statistics::txn_stats[idx][i].precommit));
+            statistics::lat_inc_wait[0].emplace_back(
+              tsctime::TscDifferenceNs(statistics::txn_stats[idx][i].arrival_time, stats_committed.commit_stats));
           }
-          std::cout << "idx = " << idx << " statistics::txn_stats[" << idx
-                    << "].size() = " << statistics::txn_stats[idx].size() << " offset = " << offset
-                    << " diff = " << statistics::txn_stats[idx].size() - offset << std::endl;
-          auto offset_rfa = 0;
-          for (const auto &stats_committed_rfa : statistics::txn_stats_rfa_committed[idx]) {
-            for (auto i = offset_rfa; i < offset_rfa + stats_committed_rfa.committed_txn; i++) {
-              statistics::txn_queue[0].emplace_back(tsctime::TscDifferenceNs(
-                statistics::txn_stats_rfa[idx][i].precommit, stats_committed_rfa.phase_2_begin));
-              statistics::rfa_txn_latency[0].emplace_back(
-                tsctime::TscDifferenceNs(statistics::txn_stats_rfa[idx][i].start, stats_committed_rfa.commit_stats));
-              statistics::txn_exec[0].emplace_back(tsctime::TscDifferenceNs(
-                statistics::txn_stats_rfa[idx][i].start, statistics::txn_stats_rfa[idx][i].precommit));
-              statistics::lat_inc_wait[0].emplace_back(tsctime::TscDifferenceNs(
-                statistics::txn_stats_rfa[idx][i].arrival_time, stats_committed_rfa.commit_stats));
-            }
-            offset_rfa += stats_committed_rfa.committed_txn;
-          }
-          /*std::cout << "idx = " << idx << " statistics::txn_stats_rfa[" << idx
-                    << "].size() = " << statistics::txn_stats_rfa[idx].size() << " offset_rfa = " << offset_rfa
-                    << " diff = " << statistics::txn_stats_rfa[idx].size() - offset_rfa << std::endl;*/
+          offset += stats_committed.committed_txn;
         }
+
+        /*std::cout << "idx = " << idx << " statistics::txn_stats_committed[" << idx
+                  << "].size() = " << statistics::txn_stats_committed[idx].size() << " statistics::txn_stats[" << idx
+                  << "].size() = " << statistics::txn_stats[idx].size() << " offset = " << offset
+                  << " diff = " << statistics::txn_stats[idx].size() - offset
+                  << " logger rest = " << log_manager->logger_[idx].precommitted_queue.no_txn_ << std::endl;*/
+        auto offset_rfa = 0;
+        for (const auto &stats_committed_rfa : statistics::txn_stats_rfa_committed[idx]) {
+          for (auto i = offset_rfa; i < offset_rfa + stats_committed_rfa.committed_txn; i++) {
+            statistics::txn_queue[0].emplace_back(
+              tsctime::TscDifferenceNs(statistics::txn_stats_rfa[idx][i].precommit, stats_committed_rfa.phase_2_begin));
+            statistics::rfa_txn_latency[0].emplace_back(
+              tsctime::TscDifferenceNs(statistics::txn_stats_rfa[idx][i].start, stats_committed_rfa.commit_stats));
+            statistics::txn_exec[0].emplace_back(tsctime::TscDifferenceNs(statistics::txn_stats_rfa[idx][i].start,
+                                                                          statistics::txn_stats_rfa[idx][i].precommit));
+            statistics::lat_inc_wait[0].emplace_back(tsctime::TscDifferenceNs(
+              statistics::txn_stats_rfa[idx][i].arrival_time, stats_committed_rfa.commit_stats));
+          }
+          offset_rfa += stats_committed_rfa.committed_txn;
+        }
+
+        /*std::cout << "idx = " << idx << " statistics::txn_stats_rfa_committed[" << idx
+                  << "].size() = " << statistics::txn_stats_rfa_committed[idx].size() << " statistics::txn_stats_rfa["
+                  << idx << "].size() = " << statistics::txn_stats_rfa[idx].size() << " offset_rfa = " << offset_rfa
+                  << " diff = " << statistics::txn_stats_rfa[idx].size() - offset_rfa << std::endl;*/
       }
+
       for (auto idx = 1U; idx < wcnt; idx++) {
         std::ranges::copy(statistics::txn_latency[idx], std::back_inserter(statistics::txn_latency[0]));
         std::ranges::copy(statistics::rfa_txn_latency[idx], std::back_inserter(statistics::rfa_txn_latency[0]));
