@@ -198,11 +198,11 @@ void LeanStore::Shutdown() {
       }
 
       for (auto idx = 1U; idx < wcnt; idx++) {
-        std::ranges::copy(statistics::txn_latency[idx], std::back_inserter(statistics::txn_latency[0]));
-        std::ranges::copy(statistics::rfa_txn_latency[idx], std::back_inserter(statistics::rfa_txn_latency[0]));
-        std::ranges::copy(statistics::lat_inc_wait[idx], std::back_inserter(statistics::lat_inc_wait[0]));
-        std::ranges::copy(statistics::txn_queue[idx], std::back_inserter(statistics::txn_queue[0]));
-        std::ranges::copy(statistics::txn_exec[idx], std::back_inserter(statistics::txn_exec[0]));
+       // std::ranges::copy(statistics::txn_latency[idx], std::back_inserter(statistics::txn_latency[0]));
+       // std::ranges::copy(statistics::rfa_txn_latency[idx], std::back_inserter(statistics::rfa_txn_latency[0]));
+       // std::ranges::copy(statistics::lat_inc_wait[idx], std::back_inserter(statistics::lat_inc_wait[0]));
+       // std::ranges::copy(statistics::txn_queue[idx], std::back_inserter(statistics::txn_queue[0]));
+       // std::ranges::copy(statistics::txn_exec[idx], std::back_inserter(statistics::txn_exec[0]));
         std::ranges::copy(statistics::io_latency[idx], std::back_inserter(statistics::io_latency[0]));
         std::ranges::copy(statistics::txn_per_round[idx], std::back_inserter(statistics::txn_per_round[0]));
       }

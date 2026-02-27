@@ -207,7 +207,7 @@ auto LockFreeQueue<T>::LoopElements_DR(u64 until_tail, QueueBlock *tail_block, c
       r_head = 0;
     }
     if (T::JumpByteBuffer(&r_block->buffer[r_head])) {
-      //std::cout << "Jump byte" << std::endl;
+      // std::cout << "Jump byte" << std::endl;
       r_block->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
       r_block    = r_block->next.load(std::memory_order_acquire);
       r_head     = r_block->head.load(std::memory_order_acquire);
@@ -278,7 +278,7 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
       blocks_looped++;
       current = current->next.load(std::memory_order_acquire);
     }
-    //if (blocks_looped > 0) { std::cout << "Txn looped = " << committed_txn_wb << std::endl; }
+    // if (blocks_looped > 0) { std::cout << "Txn looped = " << committed_txn_wb << std::endl; }
   }
 
   while (!(r_block == tail_block && r_head == until_tail)) {
@@ -287,7 +287,7 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
       r_head = 0;
     }
     if (T::JumpByteBuffer(&r_block->buffer[r_head])) {
-      //std::cout << "Jump byte" << std::endl;
+      // std::cout << "Jump byte" << std::endl;
       r_block->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
       r_block    = r_block->next.load(std::memory_order_acquire);
       r_head     = r_block->head.load(std::memory_order_acquire);
@@ -327,6 +327,7 @@ auto LockFreeQueue<T>::LoopElements(u64 until_tail, const std::function<bool(T &
   auto r_head   = head_.load(std::memory_order_acquire);
   auto old_head = r_head;
   auto no_txn   = 0;
+  auto no_bytes = 0;
 
   for (auto idx = 0UL; r_head != until_tail; idx++) {
     assert(r_head != until_tail);
@@ -340,7 +341,15 @@ auto LockFreeQueue<T>::LoopElements(u64 until_tail, const std::function<bool(T &
     no_txn++;
   }
 
-  return std::make_tuple(((r_head > old_head) ? r_head - old_head : r_head + buffer_capacity_ - old_head), no_txn);
+  if (r_head > old_head) {
+    no_bytes = r_head - old_head;
+  } else {
+    if (no_txn != 0) { no_bytes = r_head + buffer_capacity_ - old_head; }
+  }
+
+ 
+
+  return std::make_tuple(no_bytes, no_txn);
 }
 
 // ----------------------------------------------------------------------------------------------
