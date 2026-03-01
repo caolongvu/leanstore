@@ -3,9 +3,8 @@
 #include "common/exceptions.h"
 #include "common/typedefs.h"
 #include "common/utils.h"
-#include "sync/hybrid_latch.h"
 #include "leanstore/statistics.h"
-
+#include "sync/hybrid_latch.h"
 
 #include "gtest/gtest_prod.h"
 
@@ -32,7 +31,7 @@ class LockFreeQueue {
    * @brief Push a serialized element to the queue from unserialized data
    */
   template <typename T2>
-  void Push(const T2 &element) {
+  void Push(const T2 &element, auto w_id) {
     auto item_size = static_cast<uoffset_t>(element.SerializedSize());
     auto w_tail    = tail_.load(std::memory_order_acquire);
     // std::printf("Item Size: %u bytes\n", item_size);
@@ -41,6 +40,7 @@ class LockFreeQueue {
     if (buffer_capacity_ - w_tail < item_size + sizeof(T::NULL_ITEM)) {
       Ensure(buffer_capacity_ - w_tail >= sizeof(T::NULL_ITEM));
       std::memcpy(&buffer_[w_tail], &(T::NULL_ITEM), sizeof(T::NULL_ITEM));
+      looped.fetch_add(1, std::memory_order_release);
       w_tail = 0;
     }
 
@@ -50,13 +50,16 @@ class LockFreeQueue {
     auto r_head = head_.load(std::memory_order_acquire);
     // std::cout << "Debug Push : NoSpace = " << NoSpace(r_head, w_tail, item_size) << std::endl;
 
-    while (NoSpace(r_head, w_tail, item_size, no_txn_.load(std::memory_order_acquire)) && leanstore::statistics::is_running.load()) {
+    while (NoSpace(r_head, w_tail, item_size, no_txn_.load(std::memory_order_acquire)) &&
+           leanstore::statistics::is_running.load()) {
       /*std::cout << "r_head = " << r_head << " w_tail = " << w_tail << " item_size = " << item_size
               << " no_txn_ = " << no_txn_ << std::endl;
       break;*/
       auto y_start = std::chrono::high_resolution_clock::now();
       r_head       = head_.load(std::memory_order_acquire);
+
       AsmYield();
+      // std::this_thread::yield();
       yield_ns +=
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - y_start)
           .count();
@@ -103,6 +106,7 @@ class LockFreeQueue {
   std::atomic<u64> head_   = {0}; /* Read from head */
   std::atomic<u64> tail_   = {0}; /* Write to tail */
   std::atomic<u64> no_txn_ = 0;
+  std::atomic<u64> looped  = 0;
 
   std::atomic<QueueBlock *> current_read_block_;
   std::atomic<QueueBlock *> current_write_block_;
