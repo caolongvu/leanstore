@@ -89,7 +89,7 @@ class LockFreeQueue {
     std::atomic<QueueBlock *> prev{nullptr};
     std::atomic<QueueBlock *> next{nullptr};
 
-    QueueBlock() : buffer_capacity(FLAGS_txn_queue_size_mb * MB) {
+    QueueBlock(u64 capacity) : buffer_capacity(capacity) {
       buffer = reinterpret_cast<u8 *>(AllocHuge(buffer_capacity));
     }
 
@@ -108,7 +108,6 @@ class LockFreeQueue {
 
   std::atomic<QueueBlock *> current_read_block_;
   std::atomic<QueueBlock *> current_write_block_;
-  std::atomic<QueueBlock *> first_block_;
 
   auto ContiguousFreeBytes(u64 r_head, u64 w_tail) -> u64 {
     // circulate the wal_cursor to the beginning and insert the whole entry

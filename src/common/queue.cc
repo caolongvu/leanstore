@@ -19,9 +19,11 @@ template <typename T>
 LockFreeQueue<T>::LockFreeQueue() : buffer_capacity_(FLAGS_txn_queue_size_mb * MB) {
   assert(std::is_trivially_destructible_v<T>);
   if (FLAGS_dynamic_resizing) {
-    first_block_.store(new QueueBlock(), std::memory_order_release);
-    current_write_block_.store(first_block_.load(std::memory_order_acquire), std::memory_order_release);
-    current_read_block_.store(first_block_.load(std::memory_order_acquire), std::memory_order_release);
+    QueueBlock *first_block = new QueueBlock(buffer_capacity_);
+    first_block->prev.store(first_block, std::memory_order_release);
+    first_block->next.store(first_block, std::memory_order_release);
+    current_write_block_.store(first_block, std::memory_order_release);
+    current_read_block_.store(first_block, std::memory_order_release);
   } else {
     buffer_ = reinterpret_cast<u8 *>(AllocHuge(buffer_capacity_));
   }
@@ -30,12 +32,15 @@ LockFreeQueue<T>::LockFreeQueue() : buffer_capacity_(FLAGS_txn_queue_size_mb * M
 template <typename T>
 LockFreeQueue<T>::~LockFreeQueue() {
   if (FLAGS_dynamic_resizing) {
-    auto current = first_block_.load(std::memory_order_acquire);
-    while (current != nullptr) {
+    QueueBlock *first_block = current_write_block_.load(std::memory_order_acquire);
+    QueueBlock *current     = first_block;
+    while (current->next.load(std::memory_order_acquire) != first_block) {
       auto next = current->next.load(std::memory_order_acquire);
       delete current;
       current = next;
     }
+
+    delete current;
 
   } else {
     munmap(buffer_, buffer_capacity_);
@@ -71,9 +76,9 @@ void LockFreeQueue<T>::Erase(u64 no_bytes, u64 no_txn) {
 template <typename T>
 template <typename T2>
 void LockFreeQueue<T>::Push_DR(const T2 &element) {
-  auto item_size = static_cast<uoffset_t>(element.SerializedSize());
-  auto w_block   = current_write_block_.load(std::memory_order_acquire);
-  auto w_tail    = w_block->tail.load(std::memory_order_acquire);
+  auto item_size      = static_cast<uoffset_t>(element.SerializedSize());
+  QueueBlock *w_block = current_write_block_.load(std::memory_order_acquire);
+  auto w_tail         = w_block->tail.load(std::memory_order_acquire);
 
   /* Circular buffer: no room for this element + a CR entry, so we circular back */
   if (w_block->buffer_capacity - w_tail < item_size + sizeof(T::NULL_ITEM)) {
@@ -86,11 +91,15 @@ void LockFreeQueue<T>::Push_DR(const T2 &element) {
   auto r_head_w_block = w_block->head.load(std::memory_order_acquire);
   if (NoSpace(r_head_w_block, w_tail, (item_size + sizeof(T::JUMP_ITEM)),
               w_block->no_txn.load(std::memory_order_acquire))) {
-    if (w_block->next.load(std::memory_order_acquire) == nullptr) {
-      QueueBlock *new_block = new QueueBlock();
-      QueueBlock *expected  = nullptr;
+    std::printf("Jump\n");
+    QueueBlock *next = w_block->next.load(std::memory_order_acquire);
+    if (next->no_txn.load(std::memory_order_acquire) > 0) {
+      QueueBlock *new_block = new QueueBlock(w_block->buffer_capacity * 10);
+      QueueBlock *expected  = next;
       if (w_block->next.compare_exchange_strong(expected, new_block, std::memory_order_acq_rel)) {
         new_block->prev.store(w_block, std::memory_order_release);
+        new_block->next.store(next, std::memory_order_release);
+        next->prev.store(new_block, std::memory_order_release);
       } else {
         delete new_block;
       }
@@ -140,41 +149,17 @@ void LockFreeQueue<T>::Erase_DR(u64 no_bytes, u64 read_txn, u64 read_txn_b, Queu
   auto r_head  = r_block->head.load(std::memory_order_acquire);
 
   if (r_block != new_r_block) {
-    auto current = r_block;
-    while (current != new_r_block) {
-      current->no_txn.store(0, std::memory_order_release);
-      current->no_txn_b.store(0, std::memory_order_release);
-      current->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
-      current->head.store(0, std::memory_order_release);
-      current->tail.store(0, std::memory_order_release);
-      current = current->next.load(std::memory_order_acquire);
+    while (r_block != new_r_block) {
+      r_block->last_used.store(tsctime::ReadTSC(), std::memory_order_release);
+      r_block->head.store(0, std::memory_order_release);
+      r_block->tail.store(0, std::memory_order_release);
+      r_block->no_txn_b.store(0, std::memory_order_release);
+      r_block->no_txn.store(0, std::memory_order_release);
+      r_block = r_block->next.load(std::memory_order_acquire);
     }
 
-    while (current->next.load(std::memory_order_acquire) != nullptr) {
-      current = current->next.load(std::memory_order_acquire);
-    }
-
-    QueueBlock *expected = nullptr;
-
-    while (!current->next.compare_exchange_strong(expected, r_block)) {
-      current  = expected;
-      expected = nullptr;
-    }
-
-    if (first_block_.load(std::memory_order_acquire) == r_block) {
-      first_block_.store(new_r_block, std::memory_order_release);
-    }
-
-    if (r_block->prev.load(std::memory_order_acquire) != nullptr) {
-      r_block->prev.load(std::memory_order_acquire)->next.store(new_r_block, std::memory_order_release);
-    }
-
-    new_r_block->prev.load(std::memory_order_acquire)->next.store(nullptr, std::memory_order_release);
-    new_r_block->prev.store(r_block->prev.load(std::memory_order_acquire), std::memory_order_release);
-
-    r_block->prev.store(current, std::memory_order_release);
-    r_block = new_r_block;
-    r_head  = r_block->head.load(std::memory_order_acquire);
+    Ensure(r_block = new_r_block);
+    r_head = r_block->head.load(std::memory_order_acquire);
     current_read_block_.store(r_block, std::memory_order_release);
   }
 
