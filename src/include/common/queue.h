@@ -78,16 +78,18 @@ class LockFreeQueue {
 
  public:
   struct QueueBlock {
-    u8 *buffer;
+    alignas(64)std::atomic<u64> head = {0}; /* Read from head */
+    u64 local_head = 0;
+    alignas(64)std::atomic<u64> tail = {0}; /* Write to tail */
+    
+    alignas(64)std::atomic<QueueBlock *> prev{nullptr};
+    std::atomic<QueueBlock *> next{nullptr};
+    
+    alignas(64) u8 *buffer;
     u64 buffer_capacity;
     std::atomic<u64> no_txn   = 0;
     std::atomic<u64> no_txn_b = 0;
     std::atomic<uint64_t> last_used;
-    std::atomic<u64> head = {0}; /* Read from head */
-    std::atomic<u64> tail = {0}; /* Write to tail */
-
-    std::atomic<QueueBlock *> prev{nullptr};
-    std::atomic<QueueBlock *> next{nullptr};
 
     QueueBlock(u64 capacity) : buffer_capacity(capacity) {
       buffer = reinterpret_cast<u8 *>(AllocHuge(buffer_capacity));
