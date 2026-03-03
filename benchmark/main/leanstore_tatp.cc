@@ -85,10 +85,10 @@ auto main(int argc, char **argv) -> int {
   }
 
   // Run for a few seconds, then quit
-  while (leanstore::statistics::total_committed_txn < 15000000) {
+  /*while (leanstore::statistics::total_committed_txn < 15000000) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-  // std::this_thread::sleep_for(std::chrono::seconds(FLAGS_tatp_exec_seconds));
+  }*/
+  std::this_thread::sleep_for(std::chrono::seconds(FLAGS_tatp_exec_seconds));
   keep_running = false;
   ctrl.StopPerfRuntime();
   db->Shutdown();

@@ -16,7 +16,7 @@ namespace leanstore {
 // ----------------------------------------------------------------------------------------------
 
 template <typename T>
-LockFreeQueue<T>::LockFreeQueue() : buffer_capacity_(FLAGS_txn_queue_size_kb * KB) {
+LockFreeQueue<T>::LockFreeQueue() : buffer_capacity_(FLAGS_txn_queue_size_mb * MB) {
   assert(std::is_trivially_destructible_v<T>);
   if (FLAGS_dynamic_resizing) {
     first_block_.store(new QueueBlock(), std::memory_order_release);
@@ -58,7 +58,6 @@ void LockFreeQueue<T>::Erase(u64 no_bytes, u64 no_txn) {
   if (r_head + no_bytes < buffer_capacity_) {
     r_head += no_bytes;
   } else {
-    looped.fetch_add(-1, std::memory_order_release);
     r_head = no_bytes - (buffer_capacity_ - r_head);
   }
   head_.store(r_head, std::memory_order_release);
@@ -320,17 +319,14 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
 template <typename T>
 auto LockFreeQueue<T>::LoopElements(u64 until_tail, const std::function<bool(T &)> &read_cb) -> std::tuple<u64, u64> {
   auto r_head      = head_.load(std::memory_order_acquire);
+  auto curr_no_txn = no_txn_.load(std::memory_order_acquire);
   auto old_head    = r_head;
   auto no_txn      = 0;
   auto no_bytes    = 0;
-  auto curr_looped = looped.load(std::memory_order_acquire);
 
-  while (!(r_head == until_tail && curr_looped == 0)) {
+  while (curr_no_txn - no_txn > 0) {
     /* Circular back to the beginning of the buffer if deadend meet */
-    if (T::InvalidByteBuffer(&buffer_[r_head])) {
-      curr_looped--;
-      r_head = 0;
-    }
+    if (T::InvalidByteBuffer(&buffer_[r_head])) { r_head = 0; }
 
     /* Read the queued item */
     const auto item = reinterpret_cast<T *>(&buffer_[r_head]);

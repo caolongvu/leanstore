@@ -40,7 +40,6 @@ class LockFreeQueue {
     if (buffer_capacity_ - w_tail < item_size + sizeof(T::NULL_ITEM)) {
       Ensure(buffer_capacity_ - w_tail >= sizeof(T::NULL_ITEM));
       std::memcpy(&buffer_[w_tail], &(T::NULL_ITEM), sizeof(T::NULL_ITEM));
-      looped.fetch_add(1, std::memory_order_release);
       w_tail = 0;
     }
 
@@ -90,7 +89,7 @@ class LockFreeQueue {
     std::atomic<QueueBlock *> prev{nullptr};
     std::atomic<QueueBlock *> next{nullptr};
 
-    QueueBlock() : buffer_capacity(FLAGS_txn_queue_size_kb * KB) {
+    QueueBlock() : buffer_capacity(FLAGS_txn_queue_size_mb * MB) {
       buffer = reinterpret_cast<u8 *>(AllocHuge(buffer_capacity));
     }
 
@@ -106,7 +105,6 @@ class LockFreeQueue {
   std::atomic<u64> head_   = {0}; /* Read from head */
   std::atomic<u64> tail_   = {0}; /* Write to tail */
   std::atomic<u64> no_txn_ = 0;
-  std::atomic<u64> looped  = 0;
 
   std::atomic<QueueBlock *> current_read_block_;
   std::atomic<QueueBlock *> current_write_block_;
