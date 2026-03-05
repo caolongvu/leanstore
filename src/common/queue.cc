@@ -76,7 +76,7 @@ void LockFreeQueue<T>::Push_DR(const T2 &element) {
   u64 r_head          = w_block->head.load(std::memory_order_acquire);
 
   /* Allocate new queueblock */
-  if (__builtin_expect((w_tail + item_size) & w_block->mask == r_head, 0)) {
+  if (__builtin_expect(((w_tail + item_size) & w_block->mask) == r_head, 0)) {
     std::printf("Next\n");
     QueueBlock *next = w_block->next.load(std::memory_order_relaxed);
     if (next->tail.load(std::memory_order_relaxed) != next->head.load(std::memory_order_acquire)) {
