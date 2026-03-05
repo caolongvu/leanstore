@@ -158,14 +158,16 @@ void LeanStore::Shutdown() {
         auto offset = 0;
         for (const auto &stats_committed : statistics::txn_stats_committed[idx]) {
           for (auto i = offset; i < offset + stats_committed.committed_txn; i++) {
-            statistics::txn_queue[0].emplace_back(
-              tsctime::TscDifferenceNs(statistics::txn_stats[idx][i].precommit, stats_committed.phase_2_begin));
-            statistics::txn_latency[0].emplace_back(
-              tsctime::TscDifferenceNs(statistics::txn_stats[idx][i].start, stats_committed.commit_stats));
-            statistics::txn_exec[0].emplace_back(
-              tsctime::TscDifferenceNs(statistics::txn_stats[idx][i].start, statistics::txn_stats[idx][i].precommit));
-            statistics::lat_inc_wait[0].emplace_back(
-              tsctime::TscDifferenceNs(statistics::txn_stats[idx][i].arrival_time, stats_committed.commit_stats));
+            if (statistics::txn_stats[idx][i].state != transaction::Transaction::State::BARRIER) {
+              statistics::txn_queue[0].emplace_back(
+                tsctime::TscDifferenceNs(statistics::txn_stats[idx][i].stats.precommit, stats_committed.phase_2_begin));
+              statistics::txn_latency[0].emplace_back(
+                tsctime::TscDifferenceNs(statistics::txn_stats[idx][i].stats.start, stats_committed.commit_stats));
+              statistics::txn_exec[0].emplace_back(tsctime::TscDifferenceNs(
+                statistics::txn_stats[idx][i].stats.start, statistics::txn_stats[idx][i].stats.precommit));
+              statistics::lat_inc_wait[0].emplace_back(tsctime::TscDifferenceNs(
+                statistics::txn_stats[idx][i].stats.arrival_time, stats_committed.commit_stats));
+            }
           }
           offset += stats_committed.committed_txn;
         }
@@ -178,14 +180,16 @@ void LeanStore::Shutdown() {
         auto offset_rfa = 0;
         for (const auto &stats_committed_rfa : statistics::txn_stats_rfa_committed[idx]) {
           for (auto i = offset_rfa; i < offset_rfa + stats_committed_rfa.committed_txn; i++) {
-            statistics::txn_queue[0].emplace_back(
-              tsctime::TscDifferenceNs(statistics::txn_stats_rfa[idx][i].precommit, stats_committed_rfa.phase_2_begin));
-            statistics::rfa_txn_latency[0].emplace_back(
-              tsctime::TscDifferenceNs(statistics::txn_stats_rfa[idx][i].start, stats_committed_rfa.commit_stats));
-            statistics::txn_exec[0].emplace_back(tsctime::TscDifferenceNs(statistics::txn_stats_rfa[idx][i].start,
-                                                                          statistics::txn_stats_rfa[idx][i].precommit));
-            statistics::lat_inc_wait[0].emplace_back(tsctime::TscDifferenceNs(
-              statistics::txn_stats_rfa[idx][i].arrival_time, stats_committed_rfa.commit_stats));
+            if (statistics::txn_stats_rfa[idx][i].state != transaction::Transaction::State::BARRIER) {
+              statistics::txn_queue[0].emplace_back(tsctime::TscDifferenceNs(
+                statistics::txn_stats_rfa[idx][i].stats.precommit, stats_committed_rfa.phase_2_begin));
+              statistics::rfa_txn_latency[0].emplace_back(tsctime::TscDifferenceNs(
+                statistics::txn_stats_rfa[idx][i].stats.start, stats_committed_rfa.commit_stats));
+              statistics::txn_exec[0].emplace_back(tsctime::TscDifferenceNs(
+                statistics::txn_stats_rfa[idx][i].stats.start, statistics::txn_stats_rfa[idx][i].stats.precommit));
+              statistics::lat_inc_wait[0].emplace_back(tsctime::TscDifferenceNs(
+                statistics::txn_stats_rfa[idx][i].stats.arrival_time, stats_committed_rfa.commit_stats));
+            }
           }
           offset_rfa += stats_committed_rfa.committed_txn;
         }
@@ -230,12 +234,13 @@ void LeanStore::Shutdown() {
         "Statistics:\n\tAvgExecTime({:.4f} us)\n\tAvgQueue({:.4f} us)\n\tAvgLatencyInclWait({:.4f} us)\n\t"
         "AvgIOLatency({:.4f} us)\n\t"
         "AvgTxnPerCommitRound({:.4f} txns)\n\t99.9thTxnPerRound({} txns)\n\t99.99thTxnPerRound({} txns)\n\t"
-        "Push({:.4f} ns)\n\tErase({:.4f} ns)\n\tLoop({:.4f} ns)",
+        "PushAVG({:.4f} ns)\n\tPush#({})\n\tEraseAVG({:.4f} ns)\n\tErase#({})\n\tLoopAVG({:.4f} ns)\n\tLoop#({})",
         Average(statistics::txn_exec[0]) / 1000UL, Average(statistics::txn_queue[0]) / 1000UL,
         Average(statistics::lat_inc_wait[0]) / 1000UL, Average(statistics::io_latency[0]) / 1000UL,
         Average(statistics::txn_per_round[0]), Percentile(statistics::txn_per_round[0], 99.9),
         Percentile(statistics::txn_per_round[0], 99.99), Average(statistics::push_stats[0]),
-        Average(statistics::erase_stats[0]), Average(statistics::loop_stats[0]));
+        statistics::push_stats[0].size(), Average(statistics::erase_stats[0]), statistics::erase_stats[0].size(),
+        Average(statistics::loop_stats[0]), statistics::loop_stats[0].size());
       std::vector<timestamp_t> summary;
       std::merge(statistics::rfa_txn_latency[0].begin(), statistics::rfa_txn_latency[0].end(),
                  statistics::txn_latency[0].begin(), statistics::txn_latency[0].end(), std::back_inserter(summary));

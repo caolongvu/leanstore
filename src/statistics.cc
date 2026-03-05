@@ -4,28 +4,28 @@
 
 namespace leanstore::statistics {
 
-std::atomic<u64> total_committed_txn                                                  = 0;
-std::atomic<u64> txn_processed[MAX_NUMBER_OF_WORKER]                                  = {};
-std::atomic<u64> commit_rounds[MAX_NUMBER_OF_WORKER]                                  = {};
-std::vector<u64> txn_per_round[MAX_NUMBER_OF_WORKER]                                  = {};
-std::atomic<u64> precommited_txn_processed[MAX_NUMBER_OF_WORKER]                      = {};
-std::atomic<u64> precommited_rfa_txn_processed[MAX_NUMBER_OF_WORKER]                  = {};
-std::vector<u64> txn_latency[MAX_NUMBER_OF_WORKER]                                    = {};
-std::vector<u64> rfa_txn_latency[MAX_NUMBER_OF_WORKER]                                = {};
-std::vector<u64> lat_inc_wait[MAX_NUMBER_OF_WORKER]                                   = {};
-std::vector<u64> txn_queue[MAX_NUMBER_OF_WORKER]                                      = {};
-std::vector<u64> txn_exec[MAX_NUMBER_OF_WORKER]                                       = {};
-std::vector<u64> io_latency[MAX_NUMBER_OF_WORKER]                                     = {};
-std::atomic<u64> log_flush_cnt[MAX_NUMBER_OF_WORKER]                                  = {};
-std::array<i64, SAMPLING_SIZE> worker_idle_ns[MAX_NUMBER_OF_WORKER]                   = {};
-std::vector<transaction::Transaction::Statistics> txn_stats[MAX_NUMBER_OF_WORKER]     = {};
-std::vector<txn_statistics_committed> txn_stats_committed[MAX_NUMBER_OF_WORKER]       = {};
-std::vector<transaction::Transaction::Statistics> txn_stats_rfa[MAX_NUMBER_OF_WORKER] = {};
-std::vector<txn_statistics_committed> txn_stats_rfa_committed[MAX_NUMBER_OF_WORKER]   = {};
-std::atomic<bool> is_running                                                          = true;
-std::vector<u64> push_stats[MAX_NUMBER_OF_WORKER]                                     = {};
-std::vector<u64> erase_stats[MAX_NUMBER_OF_WORKER]                                    = {};
-std::vector<u64> loop_stats[MAX_NUMBER_OF_WORKER]                                     = {};
+std::atomic<u64> total_committed_txn                                                = 0;
+std::atomic<u64> txn_processed[MAX_NUMBER_OF_WORKER]                                = {};
+std::atomic<u64> commit_rounds[MAX_NUMBER_OF_WORKER]                                = {};
+std::vector<u64> txn_per_round[MAX_NUMBER_OF_WORKER]                                = {};
+std::atomic<u64> precommited_txn_processed[MAX_NUMBER_OF_WORKER]                    = {};
+std::atomic<u64> precommited_rfa_txn_processed[MAX_NUMBER_OF_WORKER]                = {};
+std::vector<u64> txn_latency[MAX_NUMBER_OF_WORKER]                                  = {};
+std::vector<u64> rfa_txn_latency[MAX_NUMBER_OF_WORKER]                              = {};
+std::vector<u64> lat_inc_wait[MAX_NUMBER_OF_WORKER]                                 = {};
+std::vector<u64> txn_queue[MAX_NUMBER_OF_WORKER]                                    = {};
+std::vector<u64> txn_exec[MAX_NUMBER_OF_WORKER]                                     = {};
+std::vector<u64> io_latency[MAX_NUMBER_OF_WORKER]                                   = {};
+std::atomic<u64> log_flush_cnt[MAX_NUMBER_OF_WORKER]                                = {};
+std::array<i64, SAMPLING_SIZE> worker_idle_ns[MAX_NUMBER_OF_WORKER]                 = {};
+std::vector<txn_statistics> txn_stats[MAX_NUMBER_OF_WORKER]                         = {};
+std::vector<txn_statistics_committed> txn_stats_committed[MAX_NUMBER_OF_WORKER]     = {};
+std::vector<txn_statistics> txn_stats_rfa[MAX_NUMBER_OF_WORKER]                     = {};
+std::vector<txn_statistics_committed> txn_stats_rfa_committed[MAX_NUMBER_OF_WORKER] = {};
+std::atomic<bool> is_running                                                        = true;
+std::vector<u64> push_stats[MAX_NUMBER_OF_WORKER]                                   = {};
+std::vector<u64> erase_stats[MAX_NUMBER_OF_WORKER]                                  = {};
+std::vector<u64> loop_stats[MAX_NUMBER_OF_WORKER]                                   = {};
 
 namespace buffer {
 std::atomic<u64> read_cnt  = 0;

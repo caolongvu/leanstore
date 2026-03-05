@@ -4,8 +4,8 @@
 #include "common/typedefs.h"
 #include "common/utils.h"
 #include "leanstore/statistics.h"
-#include "sync/hybrid_latch.h"
 #include "share_headers/time.h"
+#include "sync/hybrid_latch.h"
 
 #include "gtest/gtest_prod.h"
 
@@ -34,8 +34,8 @@ class LockFreeQueue {
   template <typename T2>
   void Push(const T2 &element, auto w_id) {
     u64 push_stat_start = tsctime::ReadTSC();
-    auto item_size = static_cast<uoffset_t>(element.SerializedSize());
-    auto w_tail    = tail_.load(std::memory_order_acquire);
+    auto item_size      = static_cast<uoffset_t>(element.SerializedSize());
+    auto w_tail         = tail_.load(std::memory_order_acquire);
     // std::printf("Item Size: %u bytes\n", item_size);
 
     /* Circular buffer: no room for this element + a CR entry, so we circular back */

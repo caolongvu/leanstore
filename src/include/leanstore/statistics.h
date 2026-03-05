@@ -9,6 +9,10 @@
 
 namespace leanstore::statistics {
 
+struct txn_statistics {
+  transaction::Transaction::State state;
+  transaction::Transaction::Statistics stats;
+};
 
 struct txn_statistics_committed {
   u64 committed_txn;
@@ -30,9 +34,9 @@ extern std::vector<u64> txn_exec[MAX_NUMBER_OF_WORKER];
 extern std::vector<u64> io_latency[MAX_NUMBER_OF_WORKER];
 extern std::atomic<u64> log_flush_cnt[MAX_NUMBER_OF_WORKER];
 extern std::array<i64, SAMPLING_SIZE> worker_idle_ns[MAX_NUMBER_OF_WORKER];
-extern std::vector<transaction::Transaction::Statistics> txn_stats[MAX_NUMBER_OF_WORKER];
+extern std::vector<txn_statistics> txn_stats[MAX_NUMBER_OF_WORKER];
 extern std::vector<txn_statistics_committed> txn_stats_committed[MAX_NUMBER_OF_WORKER];
-extern std::vector<transaction::Transaction::Statistics> txn_stats_rfa[MAX_NUMBER_OF_WORKER];
+extern std::vector<txn_statistics> txn_stats_rfa[MAX_NUMBER_OF_WORKER];
 extern std::vector<txn_statistics_committed> txn_stats_rfa_committed[MAX_NUMBER_OF_WORKER];
 extern std::atomic<bool> is_running;
 extern std::vector<u64> push_stats[MAX_NUMBER_OF_WORKER];
