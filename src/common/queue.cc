@@ -163,7 +163,7 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
   u64 old_head        = r_head;
   u64 free_bytes      = 0;
   u64 item_size       = 64;
-  u64 batching        = true;
+  bool batching       = true;
   u64 no_bytes        = 0;
   u64 no_txn          = 0;
 
