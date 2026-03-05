@@ -135,8 +135,8 @@ auto LockFreeQueue<T>::LoopElements_DR(u64 until_tail, QueueBlock *tail_block, c
     const auto item = reinterpret_cast<T *>(&r_block->buffer[r_head]);
 
     if (!read_cb(*item)) { break; }
-    no_bytes += item->MemorySize();
     r_head = (r_head + item->MemorySize()) & r_block->mask;
+    no_bytes += item->MemorySize();
     if (r_block != tail_block) {
       u64 w_tail = r_block->tail.load(std::memory_order_acquire);
       if (r_head == w_tail) {
@@ -159,24 +159,52 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
   u64 loop_stat_start = tsctime::ReadTSC();
   QueueBlock *r_block = current_read_block_.load(std::memory_order_relaxed);
   u64 r_head          = r_block->head.load(std::memory_order_relaxed);
+  u64 w_tail          = until_tail;
+  u64 old_head        = r_head;
+  u64 free_bytes      = 0;
+  u64 item_size       = 64;
+  u64 batching        = true;
   u64 no_bytes        = 0;
   u64 no_txn          = 0;
 
-  while (!(r_block == tail_block && r_head == until_tail)) {
-    const auto item = reinterpret_cast<T *>(&r_block->buffer[r_head]);
+  if (r_block != tail_block) { w_tail = r_block->tail.load(std::memory_order_acquire); }
 
-    if (!read_cb(*item)) { break; }
-    no_bytes += item->MemorySize();
-    no_txn++;
-    r_head = (r_head + item->MemorySize()) & r_block->mask;
-    if (r_block != tail_block) {
-      u64 w_tail = r_block->tail.load(std::memory_order_acquire);
-      if (r_head == w_tail) {
-        no_bytes = 0;
-        r_block  = r_block->next.load(std::memory_order_relaxed);
-        r_head   = r_block->head.load(std::memory_order_relaxed);
+  while (!(r_block == tail_block && r_head == until_tail)) {
+    if (r_block != tail_block && r_head == w_tail) {
+      no_bytes = 0;
+      r_block  = r_block->next.load(std::memory_order_relaxed);
+      r_head   = r_block->head.load(std::memory_order_relaxed);
+      if (r_block != tail_block) {
+        w_tail = r_block->tail.load(std::memory_order_acquire);
+      } else {
+        w_tail = until_tail;
+      }
+      continue;
+    }
+    old_head = r_head;
+    if (batching) {
+      free_bytes = ContiguousFreeBytes(r_head, w_tail);
+      if (free_bytes > (FLAGS_batch_looping_step_size * item_size)) {
+        r_head = (r_head + (FLAGS_batch_looping_step_size * item_size)) & r_block->mask;
+      } else {
+        r_head = (r_head + free_bytes - item_size) & r_block->mask;
       }
     }
+
+    const auto item = reinterpret_cast<T *>(&r_block->buffer[r_head]);
+    if (!read_cb(*item)) {
+      if (batching) {
+        r_head   = old_head;
+        batching = false;
+        continue;
+      } else {
+        break;
+      }
+    }
+
+    r_head = (r_head + item->MemorySize()) & r_block->mask;
+    no_bytes += ContiguousFreeBytes(old_head, r_head);
+    no_txn += ContiguousFreeBytes(old_head, r_head) / item_size;
   }
 
   statistics::loop_stats[LeanStore::worker_thread_id].emplace_back(

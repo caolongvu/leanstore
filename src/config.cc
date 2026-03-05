@@ -65,7 +65,7 @@ DEFINE_uint32(txn_commit_group_size, 2,
 DEFINE_uint32(txn_queue_size_mb, 10, "The transaction queue size in KB");
 DEFINE_bool(dynamic_resizing, false, "Enabling dynamic resizing in precommitted queue.");
 DEFINE_bool(batch_looping, false, "Enabling looping bytes in batches in precommitted queue with dynamic resizing.");
-DEFINE_uint64(queueblock_removal_threshold, 30, "Threshold after which to remove an unused queueblock in seconds.");
+DEFINE_uint64(batch_looping_step_size, 500, "Step size for batch looping variant.");
 // -----------------------------------------------------------------------------------
 /* BLOB */
 DEFINE_bool(blob_enable, false, "Whether to enable Blob functionalities");

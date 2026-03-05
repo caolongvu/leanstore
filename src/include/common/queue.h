@@ -110,9 +110,14 @@ class LockFreeQueue {
   std::atomic<QueueBlock *> current_read_block_;
   std::atomic<QueueBlock *> current_write_block_;
 
-  auto ContiguousFreeBytes(u64 r_head, u64 w_tail) -> u64 {
-    // circulate the wal_cursor to the beginning and insert the whole entry
-    return (w_tail < r_head) ? r_head - w_tail : buffer_capacity_ - w_tail;
+  auto ContiguousFreeBytes(u64 start, u64 end) -> u64 {
+    if (start == end) {
+      return 0;
+    } else if (start < end) {
+      return end - start;
+    } else {
+      return buffer_capacity_ - start + end;
+    }
   }
 
   auto NoSpace(u64 r_head, u64 w_tail, u64 space_needed, u64 no_txn) -> bool {
