@@ -104,7 +104,7 @@ void GroupCommitExecutor::StartExecution() {
        * Therefore, the group commit may cause SEGFAULT while LeanStore is deallocating,
        *  and this try-catch block is to silent that run-time problem
        */
-      
+
       return;
     }
   }
@@ -201,7 +201,7 @@ void GroupCommitExecutor::PhaseThree() {
     auto committed_txn = 0UL;
     if (FLAGS_dynamic_resizing) {
       if (FLAGS_batch_looping) {
-        auto [loop_bytes, read_txn, read_txn_b, new_r_block, committed_txn] =
+        /*auto [loop_bytes, read_txn, read_txn_b, new_r_block, committed_txn] =
           logger.precommitted_queue.Batch_Loop(ready_to_commit_cut_[w_i], ready_to_commit_block_[w_i],
                                                [&](auto &txn) { return SatisfyCommitConditions(w_i, txn); });
 
@@ -226,26 +226,34 @@ void GroupCommitExecutor::PhaseThree() {
           completed_txn_ += committed_txn;
           auto commit_stats = tsctime::ReadTSC();
           statistics::txn_stats_rfa_committed[w_i].emplace_back(committed_txn, commit_stats, phase_2_begin_);
-        }
+        }*/
       } else {
-        auto [loop_bytes, read_txn, read_txn_b, new_r_block, committed_txn] =
-          logger.precommitted_queue.LoopElements_DR(ready_to_commit_cut_[w_i], ready_to_commit_block_[w_i],
-                                                    [&](auto &txn) { return SatisfyCommitConditions(w_i, txn); });
-        if (!(loop_bytes == 0 && read_txn == 0 && new_r_block == logger.precommitted_queue.CurrentReadBlock_DR())) {
-          logger.precommitted_queue.Erase_DR(loop_bytes, read_txn, read_txn_b, new_r_block);
+        auto [loop_bytes, new_r_block] = logger.precommitted_queue.LoopElements_DR(
+          ready_to_commit_cut_[w_i], ready_to_commit_block_[w_i], [&](auto &txn) {
+            if (SatisfyCommitConditions(w_i, txn)) {
+              if (txn.state != transaction::Transaction::State::BARRIER) { committed_txn++; }
+              return true;
+            }
+            return false;
+          });
+        if (!(loop_bytes == 0 && new_r_block == logger.precommitted_queue.CurrentReadBlock_DR())) {
+          logger.precommitted_queue.Erase_DR(loop_bytes, new_r_block);
           auto commit_stats = tsctime::ReadTSC();
           statistics::txn_stats_committed[w_i].emplace_back(committed_txn, commit_stats, phase_2_begin_);
           completed_txn_ += committed_txn;
         }
 
-        /* Process RFA-transaction queue */
-        std::tie(loop_bytes, read_txn, read_txn_b, new_r_block, committed_txn) =
-          logger.precommitted_queue_rfa.LoopElements_DR(
-            ready_to_commit_rfa_cut_[w_i], ready_to_commit_rfa_block_[w_i], [&](auto &txn) {
-              return txn.commit_ts <= worker_states_[w_i].precommitted_tx_commit_ts;
-            });
-        if (!(loop_bytes == 0 && read_txn == 0 && new_r_block == logger.precommitted_queue_rfa.CurrentReadBlock_DR())) {
-          logger.precommitted_queue_rfa.Erase_DR(loop_bytes, read_txn, read_txn_b, new_r_block);
+        committed_txn                     = 0;
+        std::tie(loop_bytes, new_r_block) = logger.precommitted_queue_rfa.LoopElements_DR(
+          ready_to_commit_rfa_cut_[w_i], ready_to_commit_rfa_block_[w_i], [&](auto &txn) {
+            if (txn.commit_ts <= worker_states_[w_i].precommitted_tx_commit_ts) [[likely]] {
+              if (txn.state != transaction::Transaction::State::BARRIER) { committed_txn++; }
+              return true;
+            }
+            return false;
+          });
+        if (!(loop_bytes == 0 && new_r_block == logger.precommitted_queue_rfa.CurrentReadBlock_DR())) {
+          logger.precommitted_queue_rfa.Erase_DR(loop_bytes, new_r_block);
           auto commit_stats = tsctime::ReadTSC();
           statistics::txn_stats_rfa_committed[w_i].emplace_back(committed_txn, commit_stats, phase_2_begin_);
           completed_txn_ += committed_txn;
@@ -264,8 +272,7 @@ void GroupCommitExecutor::PhaseThree() {
         auto commit_stats = tsctime::ReadTSC();
         statistics::txn_stats_committed[w_i].emplace_back(committed_txn, commit_stats, phase_2_begin_);
         completed_txn_ += committed_txn;
-      } 
-     
+      }
 
       /* Process RFA-transaction queue */
       committed_txn = 0;
@@ -306,10 +313,9 @@ void GroupCommitExecutor::CollectConsistentState(wid_t w_i) {
 void GroupCommitExecutor::CollectPrecommittedQueue(wid_t w_i) {
   auto &logger = log_manager_->logger_[w_i];
   if (FLAGS_dynamic_resizing) {
-    ready_to_commit_cut_[w_i]       = logger.precommitted_queue.CurrentTail_DR();
-    ready_to_commit_block_[w_i]     = logger.precommitted_queue.CurrentWriteBlock_DR();
-    ready_to_commit_rfa_cut_[w_i]   = logger.precommitted_queue_rfa.CurrentTail_DR();
-    ready_to_commit_rfa_block_[w_i] = logger.precommitted_queue_rfa.CurrentWriteBlock_DR();
+    std::tie(ready_to_commit_block_[w_i], ready_to_commit_cut_[w_i]) = logger.precommitted_queue.CurrentTail_DR();
+    std::tie(ready_to_commit_rfa_block_[w_i], ready_to_commit_rfa_cut_[w_i]) =
+      logger.precommitted_queue_rfa.CurrentTail_DR();
 
   } else {
     ready_to_commit_cut_[w_i]     = logger.precommitted_queue.CurrentTail();

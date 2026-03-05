@@ -78,20 +78,15 @@ class LockFreeQueue {
 
  public:
   struct QueueBlock {
-    alignas(64)std::atomic<u64> head = {0}; /* Read from head */
-    u64 local_head = 0;
-    alignas(64)std::atomic<u64> tail = {0}; /* Write to tail */
-    
-    alignas(64)std::atomic<QueueBlock *> prev{nullptr};
-    std::atomic<QueueBlock *> next{nullptr};
-    
-    alignas(64) u8 *buffer;
-    u64 buffer_capacity;
-    std::atomic<u64> no_txn   = 0;
-    std::atomic<u64> no_txn_b = 0;
-    std::atomic<uint64_t> last_used;
+    const u64 buffer_capacity;
+    const u64 mask;
+    u8 *buffer;
+    alignas(64) std::atomic<u64> head = {0}; /* Read from head */
+    alignas(64) std::atomic<u64> tail = {0}; /* Write to tail */
 
-    QueueBlock(u64 capacity) : buffer_capacity(capacity) {
+    alignas(64) std::atomic<QueueBlock *> next{nullptr};
+
+    QueueBlock(u64 capacity) : buffer_capacity(capacity), mask(capacity - 1) {
       buffer = reinterpret_cast<u8 *>(AllocHuge(buffer_capacity));
     }
 
@@ -129,8 +124,10 @@ class LockFreeQueue {
  public:
   constexpr auto CurrentTail() -> u64 { return tail_.load(std::memory_order_acquire); }
 
-  constexpr auto CurrentTail_DR() -> u64 {
-    return current_write_block_.load(std::memory_order_acquire)->tail.load(std::memory_order_acquire);
+  constexpr auto CurrentTail_DR() -> std::tuple<QueueBlock *, u64> {
+    QueueBlock *w_block = current_write_block_.load(std::memory_order_acquire);
+    u64 w_tail          = w_block->tail.load(std::memory_order_acquire);
+    return std::make_tuple(w_block, w_tail);
   }
 
   auto CurrentWriteBlock_DR() -> QueueBlock * { return current_write_block_.load(std::memory_order_acquire); }
@@ -143,9 +140,9 @@ class LockFreeQueue {
 
   template <typename T2>
   void Push_DR(const T2 &element);
-  void Erase_DR(u64 no_bytes, u64 read_txn, u64 read_txn_b, QueueBlock *new_r_block);
+  void Erase_DR(u64 no_bytes, QueueBlock *new_r_block);
   auto LoopElements_DR(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
-    -> std::tuple<u64, u64, u64, QueueBlock *, u64>;
+    -> std::tuple<u64, QueueBlock *>;
   auto Batch_Loop(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
     -> std::tuple<u64, u64, u64, QueueBlock *, u64>;
 };
