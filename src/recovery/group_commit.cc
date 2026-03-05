@@ -202,32 +202,33 @@ void GroupCommitExecutor::PhaseThree() {
     auto committed_txn_wb = 0UL;
     if (FLAGS_dynamic_resizing) {
       if (FLAGS_batch_looping) {
-        /*auto [loop_bytes, read_txn, read_txn_b, new_r_block, committed_txn] =
+        auto [loop_bytes, new_r_block, committed_txn] =
           logger.precommitted_queue.Batch_Loop(ready_to_commit_cut_[w_i], ready_to_commit_block_[w_i],
                                                [&](auto &txn) { return SatisfyCommitConditions(w_i, txn); });
 
-        if (!(loop_bytes == 0 && read_txn == 0 && new_r_block == logger.precommitted_queue.CurrentReadBlock_DR() &&
+        if (!(loop_bytes == 0 && new_r_block == logger.precommitted_queue.CurrentReadBlock_DR() &&
               committed_txn == 0)) {
-          logger.precommitted_queue.Erase_DR(loop_bytes, read_txn, read_txn_b, new_r_block);
+          logger.precommitted_queue.Erase_DR(loop_bytes, new_r_block);
 
           completed_txn_ += committed_txn;
 
           auto commit_stats = tsctime::ReadTSC();
 
           statistics::txn_stats_committed[w_i].emplace_back(committed_txn, commit_stats, phase_2_begin_);
+          statistics::looped_elements.emplace_back(committed_txn);
         }
 
-        std::tie(loop_bytes, read_txn, read_txn_b, new_r_block, committed_txn) =
-          logger.precommitted_queue_rfa.Batch_Loop(
-            ready_to_commit_rfa_cut_[w_i], ready_to_commit_rfa_block_[w_i],
-            [&](auto &txn) { return txn.commit_ts <= worker_states_[w_i].precommitted_tx_commit_ts; });
-        if (!(loop_bytes == 0 && read_txn == 0 && new_r_block == logger.precommitted_queue_rfa.CurrentReadBlock_DR() &&
+        std::tie(loop_bytes, new_r_block, committed_txn) = logger.precommitted_queue_rfa.Batch_Loop(
+          ready_to_commit_rfa_cut_[w_i], ready_to_commit_rfa_block_[w_i],
+          [&](auto &txn) { return txn.commit_ts <= worker_states_[w_i].precommitted_tx_commit_ts; });
+        if (!(loop_bytes == 0 && new_r_block == logger.precommitted_queue_rfa.CurrentReadBlock_DR() &&
               committed_txn == 0)) {
-          logger.precommitted_queue_rfa.Erase_DR(loop_bytes, read_txn, read_txn_b, new_r_block);
+          logger.precommitted_queue_rfa.Erase_DR(loop_bytes, new_r_block);
           completed_txn_ += committed_txn;
           auto commit_stats = tsctime::ReadTSC();
           statistics::txn_stats_rfa_committed[w_i].emplace_back(committed_txn, commit_stats, phase_2_begin_);
-        }*/
+          statistics::looped_elements.emplace_back(committed_txn);
+        }
       } else {
         auto [loop_bytes, new_r_block] = logger.precommitted_queue.LoopElements_DR(
           ready_to_commit_cut_[w_i], ready_to_commit_block_[w_i], [&](auto &txn) {
@@ -243,6 +244,7 @@ void GroupCommitExecutor::PhaseThree() {
           auto commit_stats = tsctime::ReadTSC();
           statistics::txn_stats_committed[w_i].emplace_back(committed_txn_wb, commit_stats, phase_2_begin_);
           completed_txn_ += committed_txn;
+          statistics::looped_elements.emplace_back(committed_txn_wb);
         }
 
         committed_txn                     = 0;
@@ -261,6 +263,7 @@ void GroupCommitExecutor::PhaseThree() {
           auto commit_stats = tsctime::ReadTSC();
           statistics::txn_stats_rfa_committed[w_i].emplace_back(committed_txn_wb, commit_stats, phase_2_begin_);
           completed_txn_ += committed_txn;
+          statistics::looped_elements.emplace_back(committed_txn_wb);
         }
       }
     } else {
@@ -277,6 +280,7 @@ void GroupCommitExecutor::PhaseThree() {
         auto commit_stats = tsctime::ReadTSC();
         statistics::txn_stats_committed[w_i].emplace_back(committed_txn_wb, commit_stats, phase_2_begin_);
         completed_txn_ += committed_txn;
+        statistics::looped_elements.emplace_back(committed_txn_wb);
       }
 
       /* Process RFA-transaction queue */
@@ -296,6 +300,7 @@ void GroupCommitExecutor::PhaseThree() {
         auto commit_stats = tsctime::ReadTSC();
         statistics::txn_stats_rfa_committed[w_i].emplace_back(committed_txn_wb, commit_stats, phase_2_begin_);
         completed_txn_ += committed_txn;
+        statistics::looped_elements.emplace_back(committed_txn_wb);
       }
     }
   }

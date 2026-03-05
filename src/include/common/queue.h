@@ -148,7 +148,7 @@ class LockFreeQueue {
   auto LoopElements_DR(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
     -> std::tuple<u64, QueueBlock *>;
   auto Batch_Loop(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
-    -> std::tuple<u64, QueueBlock *>;
+    -> std::tuple<u64, QueueBlock *, u64>;
 };
 
 template <class T>

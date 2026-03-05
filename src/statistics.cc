@@ -26,6 +26,7 @@ std::atomic<bool> is_running                                                    
 std::vector<u64> push_stats[MAX_NUMBER_OF_WORKER]                                   = {};
 std::vector<u64> erase_stats[MAX_NUMBER_OF_WORKER]                                  = {};
 std::vector<u64> loop_stats[MAX_NUMBER_OF_WORKER]                                   = {};
+std::vector<u64> looped_elements                                                    = {};
 
 namespace buffer {
 std::atomic<u64> read_cnt  = 0;

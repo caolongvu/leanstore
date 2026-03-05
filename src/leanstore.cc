@@ -234,13 +234,13 @@ void LeanStore::Shutdown() {
         "Statistics:\n\tAvgExecTime({:.4f} us)\n\tAvgQueue({:.4f} us)\n\tAvgLatencyInclWait({:.4f} us)\n\t"
         "AvgIOLatency({:.4f} us)\n\t"
         "AvgTxnPerCommitRound({:.4f} txns)\n\t99.9thTxnPerRound({} txns)\n\t99.99thTxnPerRound({} txns)\n\t"
-        "PushAVG({:.4f} ns)\n\tPush#({})\n\tEraseAVG({:.4f} ns)\n\tErase#({})\n\tLoopAVG({:.4f} ns)\n\tLoop#({})",
+        "PushAVG({:.4f} ns)\n\tPush#({})\n\tEraseAVG({:.4f} ns)\n\tErase#({})\n\tLoopAVG({:.4f} ns)\n\tLoop#({})\n\tLoopedElements#({})",
         Average(statistics::txn_exec[0]) / 1000UL, Average(statistics::txn_queue[0]) / 1000UL,
         Average(statistics::lat_inc_wait[0]) / 1000UL, Average(statistics::io_latency[0]) / 1000UL,
         Average(statistics::txn_per_round[0]), Percentile(statistics::txn_per_round[0], 99.9),
         Percentile(statistics::txn_per_round[0], 99.99), Average(statistics::push_stats[0]),
         statistics::push_stats[0].size(), Average(statistics::erase_stats[0]), statistics::erase_stats[0].size(),
-        Average(statistics::loop_stats[0]), statistics::loop_stats[0].size());
+        Average(statistics::loop_stats[0]), statistics::loop_stats[0].size(), Average(statistics::looped_elements));
       std::vector<timestamp_t> summary;
       std::merge(statistics::rfa_txn_latency[0].begin(), statistics::rfa_txn_latency[0].end(),
                  statistics::txn_latency[0].begin(), statistics::txn_latency[0].end(), std::back_inserter(summary));

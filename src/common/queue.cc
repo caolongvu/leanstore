@@ -155,16 +155,19 @@ auto LockFreeQueue<T>::LoopElements_DR(u64 until_tail, QueueBlock *tail_block, c
 
 template <typename T>
 auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
-  -> std::tuple<u64, QueueBlock *> {
+  -> std::tuple<u64, QueueBlock *, u64> {
+  u64 loop_stat_start = tsctime::ReadTSC();
   QueueBlock *r_block = current_read_block_.load(std::memory_order_relaxed);
   u64 r_head          = r_block->head.load(std::memory_order_relaxed);
   u64 no_bytes        = 0;
+  u64 no_txn          = 0;
 
   while (!(r_block == tail_block && r_head == until_tail)) {
     const auto item = reinterpret_cast<T *>(&r_block->buffer[r_head]);
 
     if (!read_cb(*item)) { break; }
     no_bytes += item->MemorySize();
+    no_txn++;
     r_head = (r_head + item->MemorySize()) & r_block->mask;
     if (r_block != tail_block) {
       u64 w_tail = r_block->tail.load(std::memory_order_acquire);
@@ -176,7 +179,10 @@ auto LockFreeQueue<T>::Batch_Loop(u64 until_tail, QueueBlock *tail_block, const 
     }
   }
 
-  return std::make_tuple(no_bytes, r_block);
+  statistics::loop_stats[LeanStore::worker_thread_id].emplace_back(
+    tsctime::TscDifferenceNs(loop_stat_start, tsctime::ReadTSC()));
+
+  return std::make_tuple(no_bytes, r_block, no_txn);
 }
 
 /**
