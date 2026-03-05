@@ -35,8 +35,9 @@ extern std::vector<txn_statistics_committed> txn_stats_committed[MAX_NUMBER_OF_W
 extern std::vector<transaction::Transaction::Statistics> txn_stats_rfa[MAX_NUMBER_OF_WORKER];
 extern std::vector<txn_statistics_committed> txn_stats_rfa_committed[MAX_NUMBER_OF_WORKER];
 extern std::atomic<bool> is_running;
-
-
+extern std::vector<u64> push_stats[MAX_NUMBER_OF_WORKER];
+extern std::vector<u64> erase_stats[MAX_NUMBER_OF_WORKER];
+extern std::vector<u64> loop_stats[MAX_NUMBER_OF_WORKER];
 
 namespace buffer {
 extern std::atomic<u64> read_cnt;

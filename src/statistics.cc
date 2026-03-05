@@ -23,6 +23,9 @@ std::vector<txn_statistics_committed> txn_stats_committed[MAX_NUMBER_OF_WORKER] 
 std::vector<transaction::Transaction::Statistics> txn_stats_rfa[MAX_NUMBER_OF_WORKER] = {};
 std::vector<txn_statistics_committed> txn_stats_rfa_committed[MAX_NUMBER_OF_WORKER]   = {};
 std::atomic<bool> is_running                                                          = true;
+std::vector<u64> push_stats[MAX_NUMBER_OF_WORKER]                                     = {};
+std::vector<u64> erase_stats[MAX_NUMBER_OF_WORKER]                                    = {};
+std::vector<u64> loop_stats[MAX_NUMBER_OF_WORKER]                                     = {};
 
 namespace buffer {
 std::atomic<u64> read_cnt  = 0;

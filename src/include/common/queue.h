@@ -5,6 +5,7 @@
 #include "common/utils.h"
 #include "leanstore/statistics.h"
 #include "sync/hybrid_latch.h"
+#include "share_headers/time.h"
 
 #include "gtest/gtest_prod.h"
 
@@ -32,6 +33,7 @@ class LockFreeQueue {
    */
   template <typename T2>
   void Push(const T2 &element, auto w_id) {
+    u64 push_stat_start = tsctime::ReadTSC();
     auto item_size = static_cast<uoffset_t>(element.SerializedSize());
     auto w_tail    = tail_.load(std::memory_order_acquire);
     // std::printf("Item Size: %u bytes\n", item_size);
@@ -74,6 +76,8 @@ class LockFreeQueue {
     total_ns =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - start).count();
     if (yield_ns > 0) { std::printf("Total: %lu ns | Yield: %lu ns\n", total_ns, yield_ns); }
+
+    statistics::push_stats[w_id].emplace_back(tsctime::TscDifferenceNs(push_stat_start, tsctime::ReadTSC()));
   }
 
  public:
@@ -144,7 +148,7 @@ class LockFreeQueue {
   auto LoopElements_DR(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
     -> std::tuple<u64, QueueBlock *>;
   auto Batch_Loop(u64 until_tail, QueueBlock *tail_block, const std::function<bool(T &)> &read_cb)
-    -> std::tuple<u64, u64, u64, QueueBlock *, u64>;
+    -> std::tuple<u64, QueueBlock *>;
 };
 
 template <class T>
