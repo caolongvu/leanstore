@@ -77,7 +77,7 @@ void LockFreeQueue<T>::Push_DR(const T2 &element) {
 
   /* Allocate new queueblock */
   if (__builtin_expect(((w_tail + item_size) & w_block->mask) == r_head, 0)) {
-    std::printf("Next\n");
+    //std::printf("Next\n");
     QueueBlock *next = w_block->next.load(std::memory_order_relaxed);
     if (next->tail.load(std::memory_order_relaxed) != next->head.load(std::memory_order_acquire)) {
       // std::printf("Jump\n");
@@ -133,6 +133,7 @@ auto LockFreeQueue<T>::LoopElements_DR(u64 until_tail, QueueBlock *tail_block, c
       if (r_head == w_tail) {
         no_bytes = 0;
         r_block = r_block->next.load(std::memory_order_relaxed);
+        r_head = r_block->head.load(std::memory_order_relaxed);
       }
     }
   }
