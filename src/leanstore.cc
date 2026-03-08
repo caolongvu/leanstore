@@ -234,7 +234,8 @@ void LeanStore::Shutdown() {
         "Statistics:\n\tAvgExecTime({:.4f} us)\n\tAvgQueue({:.4f} us)\n\tAvgLatencyInclWait({:.4f} us)\n\t"
         "AvgIOLatency({:.4f} us)\n\t"
         "AvgTxnPerCommitRound({:.4f} txns)\n\t99.9thTxnPerRound({} txns)\n\t99.99thTxnPerRound({} txns)\n\t"
-        "PushAVG({:.4f} ns)\n\tPush#({})\n\tEraseAVG({:.4f} ns)\n\tErase#({})\n\tLoopAVG({:.4f} ns)\n\tLoop#({})\n\tLoopedElements#({})",
+        "PushAVG({:.4f} ns)\n\tPush#({})\n\tEraseAVG({:.4f} ns)\n\tErase#({})\n\tLoopAVG({:.4f} "
+        "ns)\n\tLoop#({})\n\tLoopedElements#({})",
         Average(statistics::txn_exec[0]) / 1000UL, Average(statistics::txn_queue[0]) / 1000UL,
         Average(statistics::lat_inc_wait[0]) / 1000UL, Average(statistics::io_latency[0]) / 1000UL,
         Average(statistics::txn_per_round[0]), Percentile(statistics::txn_per_round[0], 99.9),
@@ -245,6 +246,16 @@ void LeanStore::Shutdown() {
       std::merge(statistics::rfa_txn_latency[0].begin(), statistics::rfa_txn_latency[0].end(),
                  statistics::txn_latency[0].begin(), statistics::txn_latency[0].end(), std::back_inserter(summary));
       WriteSequenceToFile(summary, 1000, "latency.txt");
+
+      std::ofstream out("/home/long/leanstore/evaluation/ycsb/bdr_flush_latencies.csv", std::ios::app);
+
+      out << "latency,percentile\n";
+      int percentiles[16] = {10, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950, 970, 990, 995, 999};
+      for (auto &p : percentiles) {
+        out << static_cast<float>(statistics::txn_latency[0][(statistics::txn_latency[0].size() * p / 1000) - 1]) /
+                 1000UL
+            << "," << p / 1000.0 << "\n";
+      }
     }
   }
 }

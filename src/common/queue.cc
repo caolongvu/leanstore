@@ -20,7 +20,7 @@ LockFreeQueue<T>::LockFreeQueue() : buffer_capacity_(FLAGS_txn_queue_size_mb * M
   assert(std::is_trivially_destructible_v<T>);
   if (FLAGS_dynamic_resizing) {
     Ensure((buffer_capacity_ & (buffer_capacity_ - 1)) == 0);
-    QueueBlock *first_block = new QueueBlock(buffer_capacity_);
+    /*QueueBlock *first_block = new QueueBlock(buffer_capacity_);
     QueueBlock *last_block  = first_block;
 
     for (u64 i = 1; i < 5; ++i) {
@@ -31,12 +31,12 @@ LockFreeQueue<T>::LockFreeQueue() : buffer_capacity_(FLAGS_txn_queue_size_mb * M
 
     last_block->next.store(first_block, std::memory_order_relaxed);
     current_write_block_.store(first_block, std::memory_order_release);
-    current_read_block_.store(first_block, std::memory_order_release);
+    current_read_block_.store(first_block, std::memory_order_release);*/
 
-    /*QueueBlock *first_block = new QueueBlock(buffer_capacity_);
+    QueueBlock *first_block = new QueueBlock(buffer_capacity_);
     first_block->next.store(first_block, std::memory_order_release);
     current_write_block_.store(first_block, std::memory_order_release);
-    current_read_block_.store(first_block, std::memory_order_release);*/
+    current_read_block_.store(first_block, std::memory_order_release);
 
   } else {
     buffer_ = reinterpret_cast<u8 *>(AllocHuge(buffer_capacity_));
@@ -78,7 +78,7 @@ void LockFreeQueue<T>::Push_DR(const T2 &element) {
 
   /* Allocate new queueblock */
   if (__builtin_expect(((w_tail + item_size) & w_block->mask) == r_head, 0)) {
-    std::printf("Next\n");
+    //std::printf("Next\n");
     QueueBlock *next = w_block->next.load(std::memory_order_relaxed);
     if (next->tail.load(std::memory_order_relaxed) != next->head.load(std::memory_order_acquire)) {
       std::printf("Jump\n");
