@@ -1,0 +1,5 @@
+version,txn/s
+trad,1.18504e+07
+flush,1.2228e+07
+bdr_trad,1.26873e+07
+bdr_flush,1.28404e+07
