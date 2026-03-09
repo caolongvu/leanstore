@@ -247,9 +247,11 @@ void LeanStore::Shutdown() {
                  statistics::txn_latency[0].begin(), statistics::txn_latency[0].end(), std::back_inserter(summary));
       WriteSequenceToFile(summary, 1000, "latency.txt");
 
-      std::ofstream out("/home/long/leanstore/evaluation/ycsb/bdr_flush_latencies.csv", std::ios::app);
+      std::ofstream out("/home/long/leanstore/evaluation/ycsb/bdr_trad_latencies.csv", std::ios::app);
 
-      out << "latency,percentile\n";
+      //out << "version,txn/s\n";
+      /*out << "bdr_flush"
+          << "," << statistics::total_committed_txn.load() / 30.0 << "\n";*/
       int percentiles[16] = {10, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950, 970, 990, 995, 999};
       for (auto &p : percentiles) {
         out << static_cast<float>(statistics::txn_latency[0][(statistics::txn_latency[0].size() * p / 1000) - 1]) /
