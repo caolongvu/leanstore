@@ -19,11 +19,11 @@ template <typename T>
 LockFreeQueue<T>::LockFreeQueue() : buffer_capacity_(FLAGS_txn_queue_size_mb * MB) {
   assert(std::is_trivially_destructible_v<T>);
   if (FLAGS_dynamic_resizing) {
-    Ensure((buffer_capacity_ & (buffer_capacity_ - 1)) == 0);
-    /*QueueBlock *first_block = new QueueBlock(buffer_capacity_);
+    /*Ensure((buffer_capacity_ & (buffer_capacity_ - 1)) == 0);
+    QueueBlock *first_block = new QueueBlock(buffer_capacity_);
     QueueBlock *last_block  = first_block;
 
-    for (u64 i = 1; i < 5; ++i) {
+    for (u64 i = 1; i < 10; ++i) {
       QueueBlock *next_block = new QueueBlock(buffer_capacity_);
       last_block->next.store(next_block, std::memory_order_relaxed);
       last_block = next_block;

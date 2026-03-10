@@ -1,0 +1,5 @@
+version,txn/s
+trad,421688
+flush,424344
+bdr_trad,428325
+bdr_flush,429757
