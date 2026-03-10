@@ -257,7 +257,7 @@ void LeanStore::Shutdown() {
             << "," << p / 1000.0 << "\n";
       }*/
 
-      std::ofstream out_throughput("/home/long/leanstore/evaluation/throughput/flush.csv", std::ios::app);
+      std::ofstream out_throughput("/home/long/leanstore/evaluation/throughput/bdr_flush.csv", std::ios::app);
       //out_throughput << "threads,txn/s\n";
       out_throughput << FLAGS_worker_count << "," << statistics::total_committed_txn.load() / 30.0 << "\n";
     }
