@@ -13,14 +13,14 @@ plt.figure(figsize=(6,4))
 plt.bar(df['version'], df['txn/s'], color=['blue', 'orange', 'green', 'red'], edgecolor='black', linewidth=2 )
 
 # Achsenbeschriftung
-plt.ylabel("Throughput (txn/s)")
+plt.ylabel("Throughput [txn/s]")
 
 plt.ylim(11e6, 13e6)
 
 plt.xticks([0,1,2,3], ["Trad", "Flush", "Trad_BDR", "Flush_BDR"])
 
 # Eigene Y-Ticks (in Millionen)
-plt.yticks([11.2e6, 11.6e6, 12.0e6, 12.4e6, 12.8e6], ["11.2M", "11.6M", "12.0M", "12.4M", "12.8M"])
+plt.yticks([11.2e6, 11.6e6, 12e6, 12.4e6, 12.8e6], ["11.2M", "11.6M", "12.0M", "12.4M", "12.8M"])
 
 plt.tight_layout()
 

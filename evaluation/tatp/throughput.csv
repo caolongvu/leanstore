@@ -1,6 +1,5 @@
 version,txn/s
-trad,8.75738e+06
-flush,9.26499e+06
-flush,9.35114e+06
-flush,9.27735e+06
-flush,9.53175e+06
+trad,8.86415e+06
+flush,9.33486e+06
+bdr_trad,9.06368e+06
+bdr_flush,9.49649e+06
